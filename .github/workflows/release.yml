@@ -1441,7 +1441,17 @@ jobs:
           for gem_name in "${packages[@]}"; do
             package_dir="packages/${gem_name}"
             version=$(ruby -e 'spec = Gem::Specification.load(ARGV.fetch(0)); print spec.version' "${package_dir}/${gem_name}.gemspec")
-            exists=$(ruby -rjson -ropen-uri -e 'gem_name = ARGV.fetch(0); version = ARGV.fetch(1); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end' "$gem_name" "$version")
+            exists=false
+
+            for attempt in {1..12}; do
+              exists=$(ruby -rjson -ropen-uri -e 'gem_name = ARGV.fetch(0); version = ARGV.fetch(1); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end' "$gem_name" "$version")
+              if [ "$exists" = "true" ]; then
+                break
+              fi
+
+              echo "${gem_name} ${version} is not visible on RubyGems yet, retrying (${attempt}/12)"
+              sleep 10
+            done
 
             if [ "$exists" = "true" ]; then
               echo "${gem_name} ${version} is live on RubyGems"
