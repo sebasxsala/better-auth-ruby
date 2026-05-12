@@ -7,6 +7,7 @@ require "rake"
 
 STANDARD_PATHS = [
   "Rakefile",
+  "test",
   "packages/better_auth/Rakefile",
   "packages/better_auth/lib",
   "packages/better_auth/test",
@@ -53,6 +54,9 @@ task :ci do
   # Global linting
   puts "\n📋 Running linter..."
   sh "bundle exec standardrb #{STANDARD_PATHS.join(" ")}"
+
+  puts "\n🧪 Running workspace packaging tests..."
+  sh "ruby -Itest test/openauth_alias_packages_test.rb"
 
   # Per-package tests
   puts "\n🧪 Running tests in packages/better_auth..."

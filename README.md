@@ -140,6 +140,29 @@ Short version:
 - [`better_auth-stripe`](packages/better_auth-stripe/): Stripe billing plugin
   package.
 
+OpenAuth alias packages are also available for users who prefer that naming.
+They install and load the matching Better Auth Ruby packages, and their READMEs
+point back to the canonical documentation at https://better-auth-rb.vercel.app/.
+
+- [`openauth`](packages/openauth/): Alias for `better_auth`.
+- [`openauth-rails`](packages/openauth-rails/): Alias for `better_auth-rails`.
+- [`openauth-sinatra`](packages/openauth-sinatra/): Alias for `better_auth-sinatra`.
+- [`openauth-hanami`](packages/openauth-hanami/): Alias for `better_auth-hanami`.
+- [`openauth-mongodb`](packages/openauth-mongodb/): Alias for
+  `better_auth-mongo-adapter`.
+- [`openauth-redis-storage`](packages/openauth-redis-storage/): Alias for
+  `better_auth-redis-storage`.
+- [`openauth-api-key`](packages/openauth-api-key/): Alias for
+  `better_auth-api-key`.
+- [`openauth-passkey`](packages/openauth-passkey/): Alias for
+  `better_auth-passkey`.
+- [`openauth-oauth-provider`](packages/openauth-oauth-provider/): Alias for
+  `better_auth-oauth-provider`.
+- [`openauth-scim`](packages/openauth-scim/): Alias for `better_auth-scim`.
+- [`openauth-sso`](packages/openauth-sso/): Alias for `better_auth-sso`.
+- [`openauth-stripe`](packages/openauth-stripe/): Alias for
+  `better_auth-stripe`.
+
 ## Development
 
 ```bash
