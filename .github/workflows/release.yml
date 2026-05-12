@@ -1414,7 +1414,20 @@ jobs:
               continue
             fi
 
-            gem push "${package_dir}/${gem_name}-${version}.gem"
+            set +e
+            push_output=$(gem push "${package_dir}/${gem_name}-${version}.gem" 2>&1)
+            push_status=$?
+            set -e
+            echo "$push_output"
+
+            if [ "$push_status" -ne 0 ]; then
+              if echo "$push_output" | grep -q "Repushing of gem versions is not allowed"; then
+                echo "${gem_name} ${version} already exists on RubyGems, skipping push"
+                continue
+              fi
+
+              exit "$push_status"
+            fi
           done
 
       - name: Verify OpenAuth alias gems on RubyGems
