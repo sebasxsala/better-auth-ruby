@@ -651,6 +651,17 @@ jobs:
     needs: [prepare-release]
     if: needs.prepare-release.outputs.mongo_adapter_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\""
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 10s
     steps:
       - uses: actions/checkout@v4
 
