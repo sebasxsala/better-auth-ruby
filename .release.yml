@@ -1,0 +1,56 @@
+version: "0.7.0"
+
+version_files:
+  - packages/better_auth/lib/better_auth/version.rb
+  - packages/better_auth-api-key/lib/better_auth/api_key/version.rb
+  - packages/better_auth-hanami/lib/better_auth/hanami/version.rb
+  - packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter/version.rb
+  - packages/better_auth-mongodb/lib/better_auth/mongodb/version.rb
+  - packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb
+  - packages/better_auth-passkey/lib/better_auth/passkey/version.rb
+  - packages/better_auth-rails/lib/better_auth/rails/version.rb
+  - packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb
+  - packages/better_auth-scim/lib/better_auth/scim/version.rb
+  - packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb
+  - packages/better_auth-sso/lib/better_auth/sso/version.rb
+  - packages/better_auth-stripe/lib/better_auth/stripe/version.rb
+
+literal_gemspec_versions:
+  - packages/openauth/openauth.gemspec
+  - packages/openauth-api-key/openauth-api-key.gemspec
+  - packages/openauth-hanami/openauth-hanami.gemspec
+  - packages/openauth-mongodb/openauth-mongodb.gemspec
+  - packages/openauth-oauth-provider/openauth-oauth-provider.gemspec
+  - packages/openauth-passkey/openauth-passkey.gemspec
+  - packages/openauth-rails/openauth-rails.gemspec
+  - packages/openauth-redis-storage/openauth-redis-storage.gemspec
+  - packages/openauth-scim/openauth-scim.gemspec
+  - packages/openauth-sinatra/openauth-sinatra.gemspec
+  - packages/openauth-sso/openauth-sso.gemspec
+  - packages/openauth-stripe/openauth-stripe.gemspec
+
+pinned_dependencies:
+  packages/openauth/openauth.gemspec:
+    - better_auth
+  packages/openauth-api-key/openauth-api-key.gemspec:
+    - better_auth-api-key
+  packages/openauth-hanami/openauth-hanami.gemspec:
+    - better_auth-hanami
+  packages/openauth-mongodb/openauth-mongodb.gemspec:
+    - better_auth-mongodb
+  packages/openauth-oauth-provider/openauth-oauth-provider.gemspec:
+    - better_auth-oauth-provider
+  packages/openauth-passkey/openauth-passkey.gemspec:
+    - better_auth-passkey
+  packages/openauth-rails/openauth-rails.gemspec:
+    - better_auth-rails
+  packages/openauth-redis-storage/openauth-redis-storage.gemspec:
+    - better_auth-redis-storage
+  packages/openauth-scim/openauth-scim.gemspec:
+    - better_auth-scim
+  packages/openauth-sinatra/openauth-sinatra.gemspec:
+    - better_auth-sinatra
+  packages/openauth-sso/openauth-sso.gemspec:
+    - better_auth-sso
+  packages/openauth-stripe/openauth-stripe.gemspec:
+    - better_auth-stripe

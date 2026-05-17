@@ -10,8 +10,11 @@ on:
       - 'packages/**'
       - 'Gemfile'
       - 'Rakefile'
+      - '.release.yml'
       - 'docker-compose.yml'
       - '.ruby-version'
+      - 'script/**'
+      - 'test/**'
       - 'docs/**'
       - '.docs/**'
       - '.github/workflows/ci.yml'
@@ -24,8 +27,11 @@ on:
       - 'packages/**'
       - 'Gemfile'
       - 'Rakefile'
+      - '.release.yml'
       - 'docker-compose.yml'
       - '.ruby-version'
+      - 'script/**'
+      - 'test/**'
       - 'docs/**'
       - '.docs/**'
       - '.github/workflows/ci.yml'
@@ -46,6 +52,21 @@ env:
   BETTER_AUTH_MYSQL_DATABASE: better_auth
 
 jobs:
+  test-workspace:
+    name: Test workspace release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Run workspace packaging tests
+        run: ruby -Itest test/openauth_alias_packages_test.rb test/release_version_manifest_test.rb
+
   test-core:
     name: Test better_auth (Core)
     runs-on: ubuntu-latest
@@ -439,6 +460,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - test-core
+      - test-workspace
       - test-passkey
       - test-api-key
       - test-rails

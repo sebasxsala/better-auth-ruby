@@ -61,10 +61,30 @@ For MongoDB specifically, release `better_auth-mongodb` first. Only publish
 `better_auth-mongo-adapter` when you want to update the deprecated compatibility
 package; it depends on the exact `better_auth-mongodb` version.
 
+## Shared Version Manifest
+
+For now, all gems share the same release version. Use `.release.yml` as the
+single edit point, then sync generated version files and pinned alias
+dependencies:
+
+```bash
+rake release:sync_versions
+```
+
+The sync task updates:
+
+- `VERSION` constants in package `version.rb` files.
+- Literal `spec.version` values in OpenAuth alias gemspecs.
+- Exact OpenAuth alias dependencies such as `better_auth = X.Y.Z`.
+
+Each gem still ships with its own version file so published gems remain
+self-contained. Do not make runtime code depend on `.release.yml`.
+
 ## Version Files
 
-Each gem has independent versioning. Update only the package versions being
-released.
+Each gem still has independent versioning support. When the project stops
+releasing everything at one version, remove that package from `.release.yml` and
+update only the package versions being released.
 
 | Gem | Version file |
 | --- | --- |
@@ -124,10 +144,10 @@ git push origin main
 
 For each package being released:
 
-- Update its version file or alias gemspec version.
+- Update `.release.yml`, then run `rake release:sync_versions`.
 - Update the package changelog.
 - Update root `CHANGELOG.md` when the release is notable at the repo level.
-- Update pinned alias dependencies if the alias package is being released.
+- Confirm pinned alias dependencies changed when alias packages are being released.
 
 Do not bump versions for normal unreleased commits.
 

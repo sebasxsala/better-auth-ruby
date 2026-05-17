@@ -7,6 +7,7 @@ require "rake"
 
 STANDARD_PATHS = [
   "Rakefile",
+  "script",
   "test",
   "packages/better_auth/Rakefile",
   "packages/better_auth/lib",
@@ -59,7 +60,7 @@ task :ci do
   sh "bundle exec standardrb #{STANDARD_PATHS.join(" ")}"
 
   puts "\n🧪 Running workspace packaging tests..."
-  sh "ruby -Itest test/openauth_alias_packages_test.rb"
+  sh "ruby -Itest test/openauth_alias_packages_test.rb test/release_version_manifest_test.rb"
 
   # Per-package tests
   puts "\n🧪 Running tests in packages/better_auth..."
@@ -389,6 +390,11 @@ task :clean do
   cd "packages/better_auth-hanami" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
+end
+
+desc "Sync package versions from .release.yml"
+task "release:sync_versions" do
+  sh "ruby script/sync_versions.rb"
 end
 
 task default: :ci
