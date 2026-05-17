@@ -16,29 +16,27 @@ Plans should use checkbox steps so agents can mark progress as work is completed
 
 ## Upstream source of truth
 
-Use the `upstream/` submodule as the source of truth for Better Auth behavior.
+Use the vendored upstream Better Auth source tree as the source of truth for Better Auth behavior.
 Before porting or changing a feature, review matching upstream source and tests,
 then adapt to Ruby.
 
-In git worktrees, `upstream/` can be empty until submodules are initialized.
-Only initialize it when needed. Target upstream version: `v1.6.9`.
+Target upstream version: Better Auth `v1.6.9`, fixed at commit
+`f484269228b7eb8df0e2325e7d264bb8d7796311`.
 
-```bash
-git submodule update --init --recursive upstream
-cd upstream
-git fetch --tags origin
-git checkout v1.6.9
-cd ..
+The upstream source is checked into this repository at:
+
+```text
+upstream/better-auth/1.6.9/
 ```
 
-If this changes the recorded submodule pointer, treat it as an intentional repo
-change and include it in the related plan or PR.
+When comparing behavior, use paths under that versioned directory. For example,
+`upstream/better-auth/1.6.9/packages/better-auth/src/`.
 
 ## Testing
 
 - Avoid mocks unless the real dependency is truly impractical
 - Test actual behavior, not implementation details
-- Check upstream tests (`upstream/**/*.test.ts`) for test case ideas
+- Check upstream tests (`upstream/better-auth/1.6.9/**/*.test.ts`) for test case ideas
 - Database tests are preferred over in-memory tests
 
 ## Versioning and releases

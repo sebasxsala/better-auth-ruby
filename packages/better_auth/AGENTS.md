@@ -10,19 +10,19 @@ This is the core authentication library. It is **framework-agnostic** and depend
 
 ## Upstream Reference
 
-**Always check `upstream/` before implementing or modifying features.**
+**Always check `upstream/better-auth/1.6.9/` before implementing or modifying features.**
 
-The TypeScript code in `upstream/packages/better-auth/` is the source of truth. Workflow:
+The TypeScript code in `upstream/better-auth/1.6.9/packages/better-auth/` is the source of truth. Workflow:
 
-1. **Find the feature** in `upstream/packages/better-auth/src/` (and `plugins/` when applicable)
+1. **Find the feature** in `upstream/better-auth/1.6.9/packages/better-auth/src/` (and `plugins/` when applicable)
 2. **Understand how it works** in TypeScript
 3. **Translate to Ruby** using idiomatic Ruby and this gem’s patterns
 4. **Adapt** — same behavior, not necessarily a line-by-line port
 
 Key paths:
 
-- `upstream/packages/better-auth/src/` — core auth logic
-- `upstream/packages/better-auth/src/plugins/` — plugins
+- `upstream/better-auth/1.6.9/packages/better-auth/src/` — core auth logic
+- `upstream/better-auth/1.6.9/packages/better-auth/src/plugins/` — plugins
 
 ## Constraints
 
@@ -76,13 +76,13 @@ test/
 
 ## Translating from Upstream
 
-When porting a feature from `upstream/packages/better-auth/src/`:
+When porting a feature from `upstream/better-auth/1.6.9/packages/better-auth/src/`:
 
 1. Read the TypeScript source thoroughly
 2. Understand the data flow and side effects
 3. Write the Ruby equivalent using idiomatic patterns
 4. Ensure the same edge cases are handled
-5. Write tests that verify the same behavior (check `upstream/packages/better-auth/src/**/*.test.ts` for cases to port)
+5. Write tests that verify the same behavior (check `upstream/better-auth/1.6.9/packages/better-auth/src/**/*.test.ts` for cases to port)
 
 ## Code Style
 
