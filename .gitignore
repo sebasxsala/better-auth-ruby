@@ -18,8 +18,3 @@ coverage/
 # Ignore temp files
 tmp/
 *.log
-
-# Ignore generated local example app sandboxes
-/examples/rails-app/
-/examples/hanami_app/
-/hanami-app/
