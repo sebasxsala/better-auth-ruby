@@ -21,6 +21,7 @@ RSpec.describe BetterAuth::Generators::InstallGenerator do
 
     expect(initializer_contents).to include("BetterAuth::Rails.configure")
     expect(initializer_contents).not_to include("config.database = ->")
+    expect(initializer_contents).to include('BetterAuth::Env.get("BETTER_AUTH_URL")')
     expect(initializer_contents).to include("config.trusted_origins")
     expect(initializer_contents).to include("config.session do |session|")
     expect(initializer_contents).to include("cookie.strategy = \"jwe\"")

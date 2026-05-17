@@ -101,6 +101,45 @@ class BetterAuthConfigurationTest < Minitest::Test
     assert_includes error.message, "http://"
   end
 
+  def test_open_auth_env_aliases_override_better_auth_env_values
+    with_env(
+      "OPEN_AUTH_SECRET" => "open-auth-secret-that-is-long-enough-for-validation",
+      "BETTER_AUTH_SECRET" => "better-auth-secret-that-is-long-enough-for-validation",
+      "OPEN_AUTH_URL" => "http://open-auth.example",
+      "BETTER_AUTH_URL" => "http://better-auth.example",
+      "OPEN_AUTH_TRUSTED_ORIGINS" => "http://open-one.example, http://open-two.example",
+      "BETTER_AUTH_TRUSTED_ORIGINS" => "http://better-one.example",
+      "OPEN_AUTH_SECRETS" => "2:open-auth-rotated-secret-that-is-long-enough",
+      "BETTER_AUTH_SECRETS" => "1:better-auth-rotated-secret-that-is-long-enough"
+    ) do
+      config = BetterAuth::Configuration.new
+
+      assert_equal "open-auth-rotated-secret-that-is-long-enough", config.secret
+      assert_equal "http://open-auth.example", config.base_url
+      assert_includes config.trusted_origins, "http://open-one.example"
+      assert_includes config.trusted_origins, "http://open-two.example"
+      refute_includes config.trusted_origins, "http://better-one.example"
+    end
+  end
+
+  def test_better_auth_env_values_remain_supported_when_open_auth_aliases_are_absent
+    with_env(
+      "OPEN_AUTH_SECRET" => nil,
+      "OPEN_AUTH_URL" => nil,
+      "OPEN_AUTH_TRUSTED_ORIGINS" => nil,
+      "OPEN_AUTH_SECRETS" => nil,
+      "BETTER_AUTH_SECRET" => SECRET,
+      "BETTER_AUTH_URL" => "http://better-auth.example",
+      "BETTER_AUTH_TRUSTED_ORIGINS" => "http://better-one.example"
+    ) do
+      config = BetterAuth::Configuration.new
+
+      assert_equal SECRET, config.secret
+      assert_equal "http://better-auth.example", config.base_url
+      assert_includes config.trusted_origins, "http://better-one.example"
+    end
+  end
+
   def test_rejects_unknown_password_hasher
     error = assert_raises(BetterAuth::Error) do
       BetterAuth::Configuration.new(secret: SECRET, password_hasher: :argon2)

@@ -70,6 +70,14 @@ RSpec.describe BetterAuth::Sinatra do
     expect(options[:secrets]).to eq([{version: 1, value: "rotated-secret-that-is-long-enough-for-validation"}])
   end
 
+  it "generates a default config template that supports open auth env aliases" do
+    template = described_class.default_config_template
+
+    expect(template).to include('BetterAuth::Env.fetch("BETTER_AUTH_SECRET"')
+    expect(template).to include('BetterAuth::Env.get("BETTER_AUTH_URL")')
+    expect(template).to include('BetterAuth::Env.fetch("BETTER_AUTH_DATABASE_DIALECT"')
+  end
+
   def secret
     "sinatra-secret-that-is-long-enough-for-validation"
   end

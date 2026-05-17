@@ -215,6 +215,23 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     Rake.application = Rake::Application.new
   end
 
+  it "prefers OPEN_AUTH_DATABASE_DIALECT when generating migrations" do
+    with_env("OPEN_AUTH_DIALECT" => nil, "OPEN_AUTH_DATABASE_DIALECT" => "sqlite", "BETTER_AUTH_DIALECT" => nil, "BETTER_AUTH_DATABASE_DIALECT" => "postgres") do
+      Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+        in_directory(dir) do
+          load_tasks
+
+          Rake::Task["better_auth:generate:migration"].invoke
+
+          migration = Dir["db/better_auth/migrate/*_create_better_auth_tables.sql"].first
+          expect(File.read(migration)).to include("-- Dialect: sqlite")
+        end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
   it "normalizes common database dialect aliases when generating migrations" do
     with_env("BETTER_AUTH_DIALECT" => "postgresql", "BETTER_AUTH_DATABASE_DIALECT" => nil) do
       Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|

@@ -178,7 +178,7 @@ module BetterAuth
     end
 
     def env_base_url(base_path)
-      url = ENV["BETTER_AUTH_URL"] || ENV["NEXT_PUBLIC_BETTER_AUTH_URL"] || ENV["PUBLIC_BETTER_AUTH_URL"] || ENV["NUXT_PUBLIC_BETTER_AUTH_URL"] || ENV["NUXT_PUBLIC_AUTH_URL"]
+      url = Env.get("BETTER_AUTH_URL") || Env.get("NEXT_PUBLIC_BETTER_AUTH_URL") || Env.get("PUBLIC_BETTER_AUTH_URL") || Env.get("NUXT_PUBLIC_BETTER_AUTH_URL") || ENV["NUXT_PUBLIC_AUTH_URL"]
       url ||= ENV["BASE_URL"] if ENV["BASE_URL"] && ENV["BASE_URL"] != "/"
       url ? with_path(url, base_path) : nil
     end

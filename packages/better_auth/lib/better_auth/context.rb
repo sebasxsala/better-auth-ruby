@@ -321,7 +321,7 @@ module BetterAuth
       if options.trusted_origins_callback
         origins.concat(Array(options.trusted_origins_callback.call(request)).compact)
       end
-      origins.concat(ENV.fetch("BETTER_AUTH_TRUSTED_ORIGINS", "").split(",").map(&:strip))
+      origins.concat(Env.csv("BETTER_AUTH_TRUSTED_ORIGINS"))
       origins.map(&:to_s).reject(&:empty?).uniq
     rescue URI::InvalidURIError
       options.trusted_origins

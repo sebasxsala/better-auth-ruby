@@ -6,10 +6,10 @@ BetterAuth::Rails.configure do |config|
     Rails.application.credentials.secret_key_base ||
     Rails.application.secret_key_base
 
-  config.base_url = ENV["BETTER_AUTH_URL"]
+  config.base_url = BetterAuth::Env.get("BETTER_AUTH_URL")
   config.base_path = "/api/auth"
   config.trusted_origins = [
-    ENV["BETTER_AUTH_URL"]
+    BetterAuth::Env.get("BETTER_AUTH_URL")
   ].compact
 
   # Rails apps use BetterAuth::Rails::ActiveRecordAdapter by default.

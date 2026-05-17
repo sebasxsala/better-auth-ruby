@@ -78,7 +78,7 @@ module BetterAuth
       @trusted_origins_callbacks << options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
       @trusted_origins_callback = combined_trusted_origins_callback
       legacy_secret = resolve_secret(options, allow_test_default: false)
-      secrets = options.key?(:secrets) ? options[:secrets] : SecretConfig.parse_env(ENV["BETTER_AUTH_SECRETS"])
+      secrets = options.key?(:secrets) ? options[:secrets] : SecretConfig.parse_env(Env.get("BETTER_AUTH_SECRETS"))
       if secrets
         @secret_config = SecretConfig.build(secrets, legacy_secret, logger: logger)
         @secret = @secret_config.current_secret
@@ -279,17 +279,17 @@ module BetterAuth
     def env_base_url
       base_url = ENV["BASE_URL"]
       [
-        ENV["BETTER_AUTH_URL"],
-        ENV["NEXT_PUBLIC_BETTER_AUTH_URL"],
-        ENV["PUBLIC_BETTER_AUTH_URL"],
-        ENV["NUXT_PUBLIC_BETTER_AUTH_URL"],
+        Env.get("BETTER_AUTH_URL"),
+        Env.get("NEXT_PUBLIC_BETTER_AUTH_URL"),
+        Env.get("PUBLIC_BETTER_AUTH_URL"),
+        Env.get("NUXT_PUBLIC_BETTER_AUTH_URL"),
         ENV["NUXT_PUBLIC_AUTH_URL"],
         (base_url unless base_url == "/")
       ].find { |value| value && !value.empty? }
     end
 
     def resolve_secret(options, allow_test_default: true)
-      [options[:secret], ENV["BETTER_AUTH_SECRET"], ENV["AUTH_SECRET"]].find { |value| value && !value.empty? } ||
+      [options[:secret], Env.get("BETTER_AUTH_SECRET"), ENV["AUTH_SECRET"]].find { |value| value && !value.empty? } ||
         ((allow_test_default && test_environment?) ? DEFAULT_SECRET : nil)
     end
 
@@ -408,7 +408,7 @@ module BetterAuth
     end
 
     def env_trusted_origins
-      ENV.fetch("BETTER_AUTH_TRUSTED_ORIGINS", "").split(",").map(&:strip).reject(&:empty?)
+      Env.csv("BETTER_AUTH_TRUSTED_ORIGINS")
     end
 
     def symbolize_keys(value)

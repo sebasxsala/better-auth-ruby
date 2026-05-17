@@ -56,12 +56,12 @@ module BetterAuth
           require "better_auth/sinatra"
 
           BetterAuth::Sinatra.configure do |config|
-            config.secret = ENV.fetch("BETTER_AUTH_SECRET", "change-me-sinatra-secret-12345678901234567890")
-            config.base_url = ENV["BETTER_AUTH_URL"]
+            config.secret = BetterAuth::Env.fetch("BETTER_AUTH_SECRET", "change-me-sinatra-secret-12345678901234567890")
+            config.base_url = BetterAuth::Env.get("BETTER_AUTH_URL")
             config.base_path = "/api/auth"
 
             config.database = ->(options) do
-              case ENV.fetch("BETTER_AUTH_DATABASE_DIALECT", "postgres")
+              case BetterAuth::Env.fetch("BETTER_AUTH_DATABASE_DIALECT", "postgres")
               when "postgres", "postgresql"
                 BetterAuth::Adapters::Postgres.new(options, url: ENV.fetch("DATABASE_URL"))
               when "mysql"
@@ -69,7 +69,7 @@ module BetterAuth
               when "sqlite", "sqlite3"
                 BetterAuth::Adapters::SQLite.new(options, path: ENV.fetch("DATABASE_URL", "db/better_auth.sqlite3"))
               else
-                raise "Unsupported BETTER_AUTH_DATABASE_DIALECT for better_auth-sinatra"
+                raise "Unsupported OPEN_AUTH_DATABASE_DIALECT or BETTER_AUTH_DATABASE_DIALECT for better_auth-sinatra"
               end
             end
 
