@@ -207,6 +207,23 @@ class BetterAuthPluginsOneTapTest < Minitest::Test
     assert_equal({error: "Email not available in token"}, no_email.api.one_tap_callback(body: {idToken: "valid-id-token"}))
   end
 
+  def test_google_jwks_fetch_is_cached
+    BetterAuth::Plugins.instance_variable_set(:@one_tap_google_jwks_cache, nil)
+    calls = 0
+
+    BetterAuth::HTTPClient.stub(:get_json, ->(_url) {
+      calls += 1
+      {"keys" => []}
+    }) do
+      BetterAuth::Plugins.one_tap_google_jwks
+      BetterAuth::Plugins.one_tap_google_jwks
+    end
+
+    assert_equal 1, calls
+  ensure
+    BetterAuth::Plugins.instance_variable_set(:@one_tap_google_jwks_cache, nil)
+  end
+
   private
 
   def build_auth(options = {})

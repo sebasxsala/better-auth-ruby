@@ -80,7 +80,9 @@ module BetterAuth
         current_password = body["currentPassword"] || body["current_password"]
         validate_password_length!(new_password, ctx.context.options.email_and_password)
         account = credential_account(ctx, session[:user]["id"])
-        unless account && account["password"] && verify_password_value(ctx, current_password.to_s, account["password"])
+        raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["CREDENTIAL_ACCOUNT_NOT_FOUND"]) unless account && account["password"]
+
+        unless verify_password_value(ctx, current_password.to_s, account["password"])
           raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
         end
 
@@ -176,7 +178,9 @@ module BetterAuth
         sender = ctx.context.options.user.dig(:delete_user, :send_delete_account_verification)
         if body["password"]
           account = credential_account(ctx, session[:user]["id"])
-          unless account && account["password"] && verify_password_value(ctx, body["password"], account["password"])
+          raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["CREDENTIAL_ACCOUNT_NOT_FOUND"]) unless account && account["password"]
+
+          unless verify_password_value(ctx, body["password"], account["password"])
             raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES["INVALID_PASSWORD"])
           end
         end

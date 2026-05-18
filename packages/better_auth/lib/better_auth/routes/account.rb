@@ -118,6 +118,8 @@ module BetterAuth
       ) do |ctx|
         session = current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
+        raise APIError.new("UNAUTHORIZED") if ctx.request && !session
+
         user_id = session&.dig(:user, "id") || body["userId"] || body["user_id"]
         raise APIError.new("UNAUTHORIZED") if user_id.to_s.empty?
 
@@ -174,6 +176,8 @@ module BetterAuth
       ) do |ctx|
         session = current_session(ctx, allow_nil: true)
         body = normalize_hash(ctx.body)
+        raise APIError.new("UNAUTHORIZED") if ctx.request && !session
+
         user_id = session&.dig(:user, "id") || body["userId"] || body["user_id"]
         raise APIError.new("BAD_REQUEST", message: "Either userId or session is required") if user_id.to_s.empty?
 

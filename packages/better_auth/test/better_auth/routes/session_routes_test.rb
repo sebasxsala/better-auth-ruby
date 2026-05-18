@@ -68,6 +68,25 @@ class BetterAuthRoutesSessionTest < Minitest::Test
     assert_in_delta stale_updated_at.to_i, stored.fetch("updatedAt").to_i, 1
   end
 
+  def test_get_session_deferred_post_refreshes_stale_session
+    auth = build_auth(session: {defer_session_refresh: true, update_age: 60, expires_in: 120, cookie_cache: {enabled: false}})
+    cookie = sign_up_cookie(auth, email: "deferred-post-refresh@example.com")
+    session = auth.api.get_session(headers: {"cookie" => cookie}, method: "POST")
+    stale_updated_at = Time.now - 61
+    auth.context.adapter.update(
+      model: "session",
+      where: [{field: "token", value: session[:session]["token"]}],
+      update: {updatedAt: stale_updated_at, expiresAt: Time.now + 30}
+    )
+
+    result = auth.api.get_session(headers: {"cookie" => cookie}, method: "POST")
+    stored = auth.context.adapter.find_one(model: "session", where: [{field: "token", value: session[:session]["token"]}])
+
+    assert_equal "deferred-post-refresh@example.com", result[:user]["email"]
+    refute result.key?(:needsRefresh)
+    assert_operator stored.fetch("updatedAt"), :>, stale_updated_at
+  end
+
   def test_get_session_returns_current_session_and_user
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "session@example.com")
@@ -296,6 +315,38 @@ class BetterAuthRoutesSessionTest < Minitest::Test
 
     assert_equal "mobile", result.fetch(:session).fetch("deviceName")
     refute result.key?(:user)
+  end
+
+  def test_update_session_ignores_core_fields_and_updates_cookie
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.additional_fields(
+          session: {
+            deviceName: {type: "string", required: false}
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "update-session-core-fields@example.com")
+    original = auth.api.get_session(headers: {"cookie" => cookie})
+
+    result = auth.api.update_session(
+      headers: {"cookie" => cookie},
+      body: {
+        token: "attacker-token",
+        userId: "attacker-user",
+        expiresAt: Time.now + 86_400,
+        deviceName: "tablet"
+      },
+      return_headers: true
+    )
+    refreshed_cookie = cookie_header(result.fetch(:headers).fetch("set-cookie"))
+    refreshed = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+
+    assert_equal "tablet", result.fetch(:response).fetch(:session).fetch("deviceName")
+    assert_equal original[:session]["token"], refreshed[:session]["token"]
+    assert_equal original[:session]["userId"], refreshed[:session]["userId"]
+    assert_equal "tablet", refreshed[:session]["deviceName"]
   end
 
   def test_update_session_allows_stale_regular_session

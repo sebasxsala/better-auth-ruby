@@ -238,6 +238,15 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_PASSWORD"], error.message
   end
 
+  def test_verify_password_is_server_only_for_rack_requests
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "verify-password-rack@example.com", password: "password123")
+
+    status, _headers, _body = auth.call(rack_env("POST", "/api/auth/verify-password", body: {password: "password123"}, cookie: cookie))
+
+    assert_equal 403, status
+  end
+
   def test_verify_password_requires_session
     auth = build_auth
 
@@ -265,5 +274,23 @@ class BetterAuthRoutesPasswordTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_env(method, path, body: nil, cookie: nil)
+    payload = body ? JSON.generate(body) : ""
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(payload),
+      "CONTENT_TYPE" => body ? "application/json" : nil,
+      "CONTENT_LENGTH" => payload.bytesize.to_s,
+      "HTTP_COOKIE" => cookie,
+      "HTTP_ORIGIN" => "http://localhost:3000"
+    }.compact
   end
 end

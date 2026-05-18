@@ -92,6 +92,7 @@ module BetterAuth
           ctx.context.secret,
           expires_in: 600
         )
+        store_oauth_state_cookie(ctx, state)
         url = call_provider(provider, :create_authorization_url, {
           state: state,
           codeVerifier: code_verifier,
@@ -148,6 +149,7 @@ module BetterAuth
         raise ctx.redirect(oauth_error_url(error_url, data["error"], data["errorDescription"] || data["error_description"])) if data["error"]
         raise ctx.redirect(oauth_error_url(error_url, "oauth_provider_not_found")) unless provider
         raise ctx.redirect(oauth_error_url(error_url, "state_not_found")) unless state_data
+        raise ctx.redirect(oauth_error_url(error_url, "state_mismatch")) unless valid_oauth_state_cookie?(ctx, state)
         raise ctx.redirect(oauth_error_url(error_url, "no_code")) if data["code"].to_s.empty?
 
         tokens = call_provider(provider, :validate_authorization_code, {
@@ -269,6 +271,7 @@ module BetterAuth
           }
         }.merge(safe_additional_state(body))
         state = Crypto.sign_jwt(state_data, ctx.context.secret, expires_in: 600)
+        store_oauth_state_cookie(ctx, state)
         url = call_provider(provider, :create_authorization_url, {
           state: state,
           codeVerifier: code_verifier,
@@ -285,6 +288,10 @@ module BetterAuth
 
     def self.social_user_from_id_token!(ctx, provider, id_token)
       token = fetch_value(id_token, "token").to_s
+      unless provider_callable(provider, :verify_id_token)
+        raise APIError.new("NOT_FOUND", message: BASE_ERROR_CODES["ID_TOKEN_NOT_SUPPORTED"])
+      end
+
       valid = call_provider(provider, :verify_id_token, token, fetch_value(id_token, "nonce"))
       raise APIError.new("UNAUTHORIZED", message: BASE_ERROR_CODES["INVALID_TOKEN"]) unless valid
 
@@ -358,6 +365,22 @@ module BetterAuth
 
       session = ctx.context.internal_adapter.create_session(user["id"], false, session_overrides(ctx), true, ctx)
       {session: session, user: user, new_user: new_user}
+    end
+
+    def self.store_oauth_state_cookie(ctx, state)
+      return unless ctx.request
+
+      cookie = ctx.context.create_auth_cookie("state", max_age: 600)
+      ctx.set_signed_cookie(cookie.name, state, ctx.context.secret, cookie.attributes)
+    end
+
+    def self.valid_oauth_state_cookie?(ctx, state)
+      return true unless ctx.request
+
+      cookie = ctx.context.create_auth_cookie("state", max_age: 600)
+      stored = ctx.get_signed_cookie(cookie.name, ctx.context.secret)
+      Cookies.expire_cookie(ctx, cookie)
+      stored == state
     end
 
     def self.oauth_error_url(base_url, error, description = nil)

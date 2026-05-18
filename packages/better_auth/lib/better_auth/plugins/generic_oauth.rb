@@ -487,14 +487,17 @@ module BetterAuth
         if verification
           cookie = ctx.context.create_auth_cookie("state")
           cookie_state = ctx.get_signed_cookie(cookie.name, ctx.context.secret)
-          if cookie_state && cookie_state != state
+          if ctx.request && cookie_state != state
+            Cookies.expire_cookie(ctx, cookie)
+            raise ctx.redirect(generic_oauth_error_url(generic_oauth_state_error_url(ctx), "state_mismatch"))
+          elsif !ctx.request && cookie_state && cookie_state != state
             Cookies.expire_cookie(ctx, cookie)
             raise ctx.redirect(generic_oauth_error_url(generic_oauth_state_error_url(ctx), "state_mismatch"))
           end
 
           parsed = JSON.parse(verification.fetch("value"))
           ctx.context.internal_adapter.delete_verification_value(verification.fetch("id"))
-          Cookies.expire_cookie(ctx, cookie) if cookie_state
+          Cookies.expire_cookie(ctx, cookie) if ctx.request || cookie_state
           return parsed
         end
       end
@@ -521,7 +524,7 @@ module BetterAuth
       uri = URI(user_info_url)
       request = Net::HTTP::Get.new(uri)
       request["authorization"] = "Bearer #{fetch_value(tokens, "accessToken")}"
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       return nil unless response.is_a?(Net::HTTPSuccess)
 
       generic_oauth_normalize_user_info(JSON.parse(response.body))
@@ -615,7 +618,7 @@ module BetterAuth
       normalize_hash(provider[:discovery_headers] || provider[:discoveryHeaders]).each do |key, value|
         request[key.to_s.tr("_", "-")] = value.to_s
       end
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       provider[:_discovery] = response.is_a?(Net::HTTPSuccess) ? JSON.parse(response.body) : {}
     rescue
       {}
@@ -649,7 +652,7 @@ module BetterAuth
         form_data[key] = value unless form_data.key?(key)
       end
       request.set_form_data(form_data)
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       return nil unless response.is_a?(Net::HTTPSuccess)
 
       generic_oauth_normalize_tokens(JSON.parse(response.body))
@@ -714,7 +717,7 @@ module BetterAuth
       uri = URI(url)
       request = Net::HTTP::Get.new(uri)
       normalize_hash(headers).each { |key, value| request[key.to_s.tr("_", "-")] = value.to_s }
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       return nil unless response.is_a?(Net::HTTPSuccess)
 
       JSON.parse(response.body)
@@ -790,7 +793,7 @@ module BetterAuth
       token_url_params = token_url_params.call(ctx) if token_url_params.respond_to?(:call)
       normalize_hash(token_url_params || {}).each { |key, value| form_data[key] = value }
       request.set_form_data(form_data.compact)
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       raise APIError.new("BAD_REQUEST", message: GENERIC_OAUTH_ERROR_CODES["INVALID_OAUTH_CONFIG"]) unless response.is_a?(Net::HTTPSuccess)
 
       generic_oauth_normalize_tokens(JSON.parse(response.body))

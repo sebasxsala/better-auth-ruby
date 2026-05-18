@@ -29,7 +29,7 @@ module BetterAuth
         },
         **options
       )
-      provider[:verify_id_token] = provider[:options][:verify_id_token] || ->(token, _nonce = nil) { provider[:options][:disable_id_token_sign_in] ? false : !!Base.decode_jwt_payload(token)["sub"] }
+      provider.delete(:verify_id_token) unless provider[:verify_id_token]
       provider
     end
   end

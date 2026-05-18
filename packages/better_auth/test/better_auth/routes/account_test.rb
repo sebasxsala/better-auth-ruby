@@ -194,6 +194,97 @@ class BetterAuthRoutesAccountTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["VALIDATION_ERROR"], error.message
   end
 
+  def test_rack_get_access_token_rejects_user_id_without_session
+    auth = build_auth(social_providers: {github: {id: "github"}})
+    cookie = sign_up_cookie(auth, email: "rack-access-boundary@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-boundary",
+      accessToken: "secret-access",
+      scope: "repo"
+    )
+
+    status, _headers, body = auth.call(rack_env("POST", "/api/auth/get-access-token", body: {
+      providerId: "github",
+      userId: user_id,
+      accountId: "gh-boundary"
+    }))
+
+    assert_equal 401, status
+    refute_includes body.join, "secret-access"
+  end
+
+  def test_rack_refresh_token_rejects_user_id_without_session
+    refresh_calls = 0
+    provider = {
+      id: "github",
+      refresh_access_token: ->(_refresh_token) {
+        refresh_calls += 1
+        {accessToken: "new-access", refreshToken: "new-refresh"}
+      }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "rack-refresh-boundary@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-refresh-boundary",
+      refreshToken: "secret-refresh"
+    )
+
+    status, _headers, body = auth.call(rack_env("POST", "/api/auth/refresh-token", body: {
+      providerId: "github",
+      userId: user_id,
+      accountId: "gh-refresh-boundary"
+    }))
+
+    assert_equal 401, status
+    assert_equal 0, refresh_calls
+    refute_includes body.join, "new-refresh"
+  end
+
+  def test_direct_get_access_token_allows_server_user_id_without_session
+    auth = build_auth(social_providers: {github: {id: "github"}})
+    cookie = sign_up_cookie(auth, email: "direct-access-boundary@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-direct",
+      accessToken: "direct-access",
+      scope: "repo"
+    )
+
+    token_data = auth.api.get_access_token(body: {providerId: "github", userId: user_id, accountId: "gh-direct"})
+
+    assert_equal "direct-access", token_data[:accessToken]
+  end
+
+  def test_direct_refresh_token_allows_server_user_id_without_session
+    provider = {
+      id: "github",
+      refresh_access_token: ->(_refresh_token) {
+        {accessToken: "direct-new-access", refreshToken: "direct-new-refresh"}
+      }
+    }
+    auth = build_auth(social_providers: {github: provider})
+    cookie = sign_up_cookie(auth, email: "direct-refresh-boundary@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.context.internal_adapter.create_account(
+      userId: user_id,
+      providerId: "github",
+      accountId: "gh-direct-refresh",
+      refreshToken: "direct-refresh"
+    )
+
+    token_data = auth.api.refresh_token(body: {providerId: "github", userId: user_id, accountId: "gh-direct-refresh"})
+
+    assert_equal "direct-new-refresh", token_data[:refreshToken]
+  end
+
   def test_get_access_token_selects_requested_same_provider_account
     auth = build_auth(
       social_providers: {
@@ -541,5 +632,21 @@ class BetterAuthRoutesAccountTest < Minitest::Test
 
   def fake_ctx(auth)
     Struct.new(:context).new(auth.context)
+  end
+
+  def rack_env(method, path, body: nil)
+    payload = body ? JSON.generate(body) : ""
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path,
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(payload),
+      "CONTENT_TYPE" => body ? "application/json" : nil,
+      "CONTENT_LENGTH" => payload.bytesize.to_s
+    }.compact
   end
 end

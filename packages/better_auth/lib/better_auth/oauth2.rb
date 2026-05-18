@@ -81,7 +81,7 @@ module BetterAuth
 
     def post_form(token_endpoint, request)
       uri = URI.parse(token_endpoint)
-      response = Net::HTTP.post(uri, URI.encode_www_form(request[:body]), request[:headers])
+      response = HTTPClient.post_form(uri, URI.encode_www_form(request[:body]), request[:headers])
       JSON.parse(response.body)
     end
 

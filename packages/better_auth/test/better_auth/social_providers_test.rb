@@ -110,6 +110,18 @@ class BetterAuthSocialProvidersTest < Minitest::Test
     refute provider.fetch(:verify_id_token).call(fake_jwt("iss" => "https://accounts.google.com", "aud" => "ios-id", "sub" => "sub-1"))
   end
 
+  def test_id_token_jwks_timeout_returns_invalid_token_result
+    provider = BetterAuth::SocialProviders.google(
+      client_id: "google-id",
+      client_secret: "google-secret",
+      jwks_endpoint: "https://issuer.example/jwks"
+    )
+
+    Net::HTTP.stub(:start, ->(*_args, **_kwargs) { raise Net::OpenTimeout }) do
+      refute provider.fetch(:verify_id_token).call(fake_jwt("iss" => "https://accounts.google.com", "aud" => "google-id", "sub" => "sub-1"))
+    end
+  end
+
   def test_apple_id_token_verifier_uses_jwks_and_audience_override
     key = OpenSSL::PKey::RSA.generate(2048)
     provider = BetterAuth::SocialProviders.apple(

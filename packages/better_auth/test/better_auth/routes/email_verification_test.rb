@@ -75,6 +75,25 @@ class BetterAuthRoutesEmailVerificationTest < Minitest::Test
     assert_equal true, session[:user]["emailVerified"]
   end
 
+  def test_verify_email_auto_sign_in_does_not_reuse_different_users_session
+    auth = build_auth(email_verification: {auto_sign_in_after_verification: true})
+    first_cookie = sign_up_cookie(auth, email: "already-signed-in@example.com")
+    first_session = auth.api.get_session(headers: {"cookie" => first_cookie})
+    auth.api.sign_up_email(body: {email: "verified-other-user@example.com", password: "password123", name: "Other"})
+    token = BetterAuth::Crypto.sign_jwt({"email" => "verified-other-user@example.com"}, SECRET, expires_in: 3600)
+
+    _status, headers, _body = auth.api.verify_email(
+      headers: {"cookie" => first_cookie},
+      query: {token: token},
+      as_response: true
+    )
+    refreshed_cookie = cookie_header(headers.fetch("set-cookie"))
+    session = auth.api.get_session(headers: {"cookie" => refreshed_cookie})
+
+    assert_equal "verified-other-user@example.com", session[:user]["email"]
+    refute_equal first_session[:session]["token"], session[:session]["token"]
+  end
+
   def test_verify_email_redirects_to_callback_url_with_existing_query
     auth = build_auth
     auth.api.sign_up_email(body: {email: "redirect-verified@example.com", password: "password123", name: "Verified"})
