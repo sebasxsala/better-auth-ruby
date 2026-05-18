@@ -63,7 +63,7 @@ task :ci do
   sh "bundle exec standardrb #{STANDARD_PATHS.join(" ")}"
 
   puts "\n🧪 Running workspace packaging tests..."
-  sh "ruby -Itest -e 'require \"./test/openauth_alias_packages_test\"; require \"./test/release_version_manifest_test\"'"
+  sh "bundle exec ruby -Itest -e 'require \"./test/openauth_alias_packages_test\"; require \"./test/release_version_manifest_test\"'"
 
   # Per-package tests
   puts "\n🧪 Running tests in packages/better_auth..."

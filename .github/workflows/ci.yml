@@ -77,7 +77,7 @@ jobs:
           bundler-cache: true
 
       - name: Run workspace packaging tests
-        run: ruby -Itest -e 'require "./test/openauth_alias_packages_test"; require "./test/release_version_manifest_test"'
+        run: bundle exec ruby -Itest -e 'require "./test/openauth_alias_packages_test"; require "./test/release_version_manifest_test"'
 
   test-core:
     name: Test better_auth (Core)
