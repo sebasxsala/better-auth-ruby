@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module BetterAuth
-  module Sinatra
+  module Roda
     module Migration
       DEFAULT_MIGRATIONS_PATH = BetterAuth::Migration::SQL::DEFAULT_MIGRATIONS_PATH
       MISSING_MIGRATIONS_TABLE_MESSAGES = BetterAuth::Migration::SQL::MISSING_MIGRATIONS_TABLE_MESSAGES
@@ -10,7 +10,7 @@ module BetterAuth
       module_function
 
       def render(options, dialect:)
-        BetterAuth::Migration::SQL.render(options, dialect: dialect, source: "better_auth-sinatra")
+        BetterAuth::Migration::SQL.render(options, dialect: dialect, source: "better_auth-roda")
       end
 
       def generate(options, dialect:, migrations_path: DEFAULT_MIGRATIONS_PATH, timestamp: Time.now.utc.strftime("%Y%m%d%H%M%S"))
@@ -19,12 +19,12 @@ module BetterAuth
           dialect: dialect,
           migrations_path: migrations_path,
           timestamp: timestamp,
-          source: "better_auth-sinatra"
+          source: "better_auth-roda"
         )
       end
 
       def migrate(auth_or_options, migrations_path: DEFAULT_MIGRATIONS_PATH)
-        BetterAuth::Migration::SQL.migrate(auth_or_options, migrations_path: migrations_path, package_name: "better_auth-sinatra")
+        BetterAuth::Migration::SQL.migrate(auth_or_options, migrations_path: migrations_path, package_name: "better_auth-roda")
       end
 
       def method_missing(name, *args, **kwargs, &block)

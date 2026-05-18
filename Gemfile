@@ -21,6 +21,7 @@ gem "better_auth-scim", path: "packages/better_auth-scim"
 gem "better_auth-sso", path: "packages/better_auth-sso"
 gem "better_auth-telemetry", path: "packages/better_auth-telemetry"
 gem "better_auth-rails", path: "packages/better_auth-rails"
+gem "better_auth-roda", path: "packages/better_auth-roda"
 gem "better_auth-sinatra", path: "packages/better_auth-sinatra"
 gem "better_auth-hanami", path: "packages/better_auth-hanami"
 gem "openauth", path: "packages/openauth"
@@ -34,6 +35,7 @@ gem "openauth-scim", path: "packages/openauth-scim"
 gem "openauth-sso", path: "packages/openauth-sso"
 gem "openauth-telemetry", path: "packages/openauth-telemetry"
 gem "openauth-rails", path: "packages/openauth-rails"
+gem "openauth-roda", path: "packages/openauth-roda"
 gem "openauth-sinatra", path: "packages/openauth-sinatra"
 gem "openauth-hanami", path: "packages/openauth-hanami"
 
@@ -52,6 +54,7 @@ group :development, :test do
   gem "hanami", ">= 2.3", "< 2.4"
   gem "hanami-router", ">= 2.3", "< 3"
   gem "rom-sql", ">= 3.7", "< 4"
+  gem "roda", ">= 3.0", "< 4"
   gem "tiny_tds", "~> 2.1"
 
   # Git hooks

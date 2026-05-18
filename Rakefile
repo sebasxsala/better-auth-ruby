@@ -45,6 +45,9 @@ STANDARD_PATHS = [
   "packages/better_auth-rails/Rakefile",
   "packages/better_auth-rails/lib",
   "packages/better_auth-rails/spec",
+  "packages/better_auth-roda/Rakefile",
+  "packages/better_auth-roda/lib",
+  "packages/better_auth-roda/spec",
   "packages/better_auth-sinatra/Rakefile",
   "packages/better_auth-sinatra/lib",
   "packages/better_auth-sinatra/spec",
@@ -135,6 +138,11 @@ task :ci do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
   end
 
+  puts "\n🧪 Running tests in packages/better_auth-roda..."
+  cd "packages/better_auth-roda" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
+  end
+
   puts "\n🧪 Running tests in packages/better_auth-sinatra..."
   cd "packages/better_auth-sinatra" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
@@ -218,6 +226,11 @@ task :install do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
   end
 
+  puts "\n📦 Installing packages/better_auth-roda dependencies..."
+  cd "packages/better_auth-roda" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle install"
+  end
+
   puts "\n📦 Installing packages/better_auth-sinatra dependencies..."
   cd "packages/better_auth-sinatra" do
     sh "BUNDLE_GEMFILE=Gemfile bundle install"
@@ -285,6 +298,10 @@ task :lint do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
 
+  cd "packages/better_auth-roda" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
+  end
+
   cd "packages/better_auth-sinatra" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb"
   end
@@ -347,6 +364,10 @@ task "lint:fix" do
   end
 
   cd "packages/better_auth-rails" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
+  end
+
+  cd "packages/better_auth-roda" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec standardrb --fix"
   end
 
@@ -427,6 +448,10 @@ task :clean do
   end
 
   cd "packages/better_auth-rails" do
+    sh "rm -rf Gemfile.lock *.gem coverage/"
+  end
+
+  cd "packages/better_auth-roda" do
     sh "rm -rf Gemfile.lock *.gem coverage/"
   end
 

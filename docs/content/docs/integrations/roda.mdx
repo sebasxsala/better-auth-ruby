@@ -1,0 +1,81 @@
+---
+title: Roda Integration
+description: Use Better Auth Ruby in Roda.
+---
+
+The Roda adapter mounts the core Better Auth Rack app through a Roda plugin and
+provides request helpers plus SQL migration tasks.
+
+## Install
+
+```ruby title="Gemfile"
+gem "better_auth-roda"
+```
+
+```bash title="Terminal"
+bundle install
+```
+
+## Configure
+
+```ruby title="app.rb"
+require "json"
+require "roda"
+require "better_auth/roda"
+
+class App < Roda
+  plugin :better_auth
+
+  better_auth at: "/api/auth" do |config|
+    config.secret = ENV.fetch("BETTER_AUTH_SECRET")
+    config.base_url = ENV.fetch("BETTER_AUTH_URL", "http://localhost:3000")
+    config.database = :memory
+    config.email_and_password = {enabled: true}
+  end
+
+  route do |r|
+    r.better_auth
+
+    r.get "dashboard" do
+      response["content-type"] = "application/json"
+      JSON.generate(authenticated: authenticated?, user: current_user)
+    end
+  end
+end
+```
+
+`r.better_auth` should run before application routes that might otherwise match
+the auth path.
+
+## Helpers
+
+Roda route blocks can call:
+
+- `current_session`
+- `current_user`
+- `authenticated?`
+- `require_authentication`
+
+`require_authentication` halts with `401`. When the request prefers JSON, it
+returns the Better Auth JSON error shape.
+
+## Migrations
+
+Roda uses the core SQL adapters explicitly; it does not select a Sequel adapter
+by default.
+
+```bash title="Terminal"
+bundle exec rake better_auth:install
+BETTER_AUTH_DATABASE_DIALECT=postgres bundle exec rake better_auth:generate:migration
+bundle exec rake better_auth:migrate
+```
+
+The generated config lives at `config/better_auth.rb`. Set `BETTER_AUTH_CONFIG`
+to load a different config file.
+
+## Notes
+
+- The mount path cannot be `/`, because it would capture the whole Roda app.
+- Call `better_auth` once per Roda app class.
+- Origin checks, callback URL validation, server-only endpoint blocking, and
+  Better Auth cookies are handled by the shared core Rack runtime.

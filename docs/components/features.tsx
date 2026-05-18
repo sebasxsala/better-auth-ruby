@@ -19,7 +19,7 @@ const features = [
 		label: "Rack First",
 		title: "Run auth in any <strong>Rack</strong> app.",
 		description:
-			"Mount Better Auth in Rack, Sinatra, Rails, or any Ruby server that speaks Rack.",
+			"Mount Better Auth in Rack, Sinatra, Rails, Roda, or any Ruby server that speaks Rack.",
 		icon: PlugZap2Icon,
 	},
 	{

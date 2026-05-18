@@ -15,6 +15,7 @@ that maps cleanly to Ruby, while exposing an idiomatic server API through
 - A framework-agnostic Rack core gem: `better_auth`
 - A Rails adapter gem: `better_auth-rails`
 - A Hanami adapter gem: `better_auth-hanami`
+- A Roda adapter gem: `better_auth-roda`
 - Email/password auth, social OAuth routes, sessions, cookies, hooks, and rate limiting
 - PostgreSQL, MySQL, memory, and Rails ActiveRecord persistence paths
 - The upstream-style plugin system with Ruby plugin modules
@@ -30,7 +31,7 @@ the full upstream surface. The implementation plan and parity notes live in:
 
 The short version:
 
-- Core Rack auth and Rails, Sinatra, and Hanami mounting are implemented.
+- Core Rack auth and Rails, Sinatra, Hanami, and Roda mounting are implemented.
 - Most server-side plugins have Ruby implementations with local tests, including
   SSO, SCIM, Stripe, API key, OAuth Provider, and Dub.
 - OpenAPI generation is supported with upstream base-route inventory, rich
@@ -46,6 +47,9 @@ gem "better_auth-rails"
 
 # Hanami 2.3+ apps can use:
 gem "better_auth-hanami"
+
+# Roda apps can use:
+gem "better_auth-roda"
 ```
 
 ## How It Fits Together
@@ -61,7 +65,7 @@ BetterAuth.auth(options)
   -> BetterAuth::Plugins::*
 ```
 
-Rails and Hanami integrations wrap the same core Rack auth object. They do not
+Rails, Hanami, and Roda integrations wrap the same core Rack auth object. They do not
 reimplement auth in controllers or actions.
 
 ## Next Steps
@@ -69,6 +73,7 @@ reimplement auth in controllers or actions.
 Start with [Installation](/docs/installation), then pick either the
 [Rack integration](/docs/integrations/rack),
 [Rails integration](/docs/integrations/rails), or
-[Hanami integration](/docs/integrations/hanami).
+[Hanami integration](/docs/integrations/hanami), or
+[Roda integration](/docs/integrations/roda).
 
 {/* Upstream introduction is preserved in upstream/docs/content/docs/introduction.mdx. */}

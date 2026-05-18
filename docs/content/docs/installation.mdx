@@ -8,7 +8,7 @@ description: Install and configure Better Auth Ruby.
 <Step>
 ### Install The Gem
 
-For Rack, Sinatra, Hanami, Roda, or another Rack-based app:
+For plain Rack or another Rack-based app:
 
 ```ruby title="Gemfile"
 gem "better_auth"
@@ -24,6 +24,12 @@ For Hanami 2.3+ apps:
 
 ```ruby title="Gemfile"
 gem "better_auth-hanami"
+```
+
+For Roda apps:
+
+```ruby title="Gemfile"
+gem "better_auth-roda"
 ```
 
 Then install dependencies:
@@ -115,6 +121,13 @@ For Hanami:
 bundle exec rake better_auth:init
 bin/hanami db migrate
 ```
+
+For Roda:
+
+```bash title="Terminal"
+bundle exec rake better_auth:install
+bundle exec rake better_auth:generate:migration
+```
 </Step>
 
 <Step>
@@ -135,6 +148,20 @@ Rails:
 ```ruby title="config/routes.rb"
 Rails.application.routes.draw do
   better_auth
+end
+```
+
+Roda:
+
+```ruby title="app.rb"
+class App < Roda
+  plugin :better_auth
+
+  better_auth
+
+  route do |r|
+    r.better_auth
+  end
 end
 ```
 

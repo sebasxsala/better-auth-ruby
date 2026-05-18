@@ -10,6 +10,7 @@
     "integrations/rack",
     "integrations/rails",
     "integrations/sinatra",
+    "integrations/roda",
     "email-password/sign-in-and-sign-up",
     "email-password/password-reset",
     "email-password/configuration",

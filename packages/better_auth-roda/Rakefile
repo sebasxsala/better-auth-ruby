@@ -1,0 +1,26 @@
+# frozen_string_literal: true
+
+require "bundler/gem_helper"
+require "rspec/core/rake_task"
+
+Bundler::GemHelper.install_tasks(name: "better_auth-roda")
+
+RSpec::Core::RakeTask.new(:spec)
+
+desc "Run StandardRB linter"
+task :lint do
+  sh "bundle exec standardrb"
+end
+
+desc "Auto-fix StandardRB issues"
+task "lint:fix" do
+  sh "bundle exec standardrb --fix"
+end
+
+desc "Run all tests"
+task test: :spec
+
+desc "Run full CI check (lint + test)"
+task ci: [:lint, :test]
+
+task default: :ci
