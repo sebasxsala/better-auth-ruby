@@ -4,33 +4,59 @@ require "better_auth"
 require_relative "redis_storage/version"
 
 module BetterAuth
-  def self.redis_storage(client:, key_prefix: RedisStorage::DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
-    RedisStorage.new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
-  end
-
   class RedisStorage
+    UNSET = Object.new.freeze
     DEFAULT_KEY_PREFIX = "better-auth:"
     SCAN_DEFAULT_COUNT = 100
     DELETE_CHUNK_SIZE = 500
 
     attr_reader :client, :key_prefix, :scan_count, :atomic_clear
 
-    def self.build(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
-      new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
+    def self.build(client:, key_prefix: UNSET, scan_count: UNSET, atomic_clear: false, **options)
+      key_prefix_camel = extract_key_prefix_camel!(options)
+      reject_unknown_keywords!(options)
+      new(client: client, key_prefix: key_prefix, key_prefix_camel: key_prefix_camel, scan_count: scan_count, atomic_clear: atomic_clear)
     end
 
-    def self.redisStorage(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
-      new(client: client, key_prefix: key_prefix, scan_count: scan_count, atomic_clear: atomic_clear)
+    def self.redisStorage(client:, key_prefix: UNSET, scan_count: UNSET, atomic_clear: false, **options)
+      key_prefix_camel = extract_key_prefix_camel!(options)
+      reject_unknown_keywords!(options)
+      new(client: client, key_prefix: key_prefix, key_prefix_camel: key_prefix_camel, scan_count: scan_count, atomic_clear: atomic_clear)
     end
 
-    def initialize(client:, key_prefix: DEFAULT_KEY_PREFIX, scan_count: nil, atomic_clear: false)
+    def initialize(client:, key_prefix: UNSET, key_prefix_camel: UNSET, scan_count: UNSET, atomic_clear: false, **options)
+      key_prefix_camel = self.class.extract_key_prefix_camel!(options) if key_prefix_camel.equal?(UNSET)
+      self.class.reject_unknown_keywords!(options)
       @client = client
-      @key_prefix = key_prefix.nil? ? DEFAULT_KEY_PREFIX : key_prefix.to_s
+      @key_prefix = self.class.resolve_key_prefix(key_prefix, key_prefix_camel)
+      scan_count = SCAN_DEFAULT_COUNT if scan_count.equal?(UNSET)
       if !scan_count.nil? && !(scan_count.is_a?(Integer) && scan_count.positive?)
         raise ArgumentError, "scan_count must be nil or a positive Integer; got #{scan_count.inspect}"
       end
       @scan_count = scan_count
       @atomic_clear = !!atomic_clear
+    end
+
+    def self.extract_key_prefix_camel!(options)
+      options.key?(:keyPrefix) ? options.delete(:keyPrefix) : UNSET
+    end
+
+    def self.reject_unknown_keywords!(options)
+      return if options.empty?
+
+      unknown = options.keys.map(&:inspect).join(", ")
+      label = (options.length == 1) ? "keyword" : "keywords"
+      raise ArgumentError, "unknown #{label}: #{unknown}"
+    end
+
+    def self.resolve_key_prefix(key_prefix, key_prefix_camel)
+      if !key_prefix.equal?(UNSET) && !key_prefix_camel.equal?(UNSET) && key_prefix != key_prefix_camel
+        raise ArgumentError, "key_prefix and keyPrefix cannot both be provided with different values"
+      end
+
+      selected = key_prefix.equal?(UNSET) ? key_prefix_camel : key_prefix
+      selected = DEFAULT_KEY_PREFIX if selected.equal?(UNSET) || selected.nil?
+      selected.to_s
     end
 
     def get(key)
@@ -113,30 +139,34 @@ module BetterAuth
     def storage_keys(prefix = storage_prefix)
       return scan_keys(prefix) if scan_count
 
-      client.keys("#{prefix}*")
+      client.keys(match_pattern(prefix))
     end
 
     def scan_keys(prefix = storage_prefix)
+      seen = {}
       matches = []
-      each_scan_batch(prefix) { |keys| matches.concat(keys) }
+      each_scan_batch(prefix) do |keys|
+        keys.each do |key|
+          next if seen[key]
+
+          seen[key] = true
+          matches << key
+        end
+      end
       matches
     end
 
     def each_scan_batch(prefix = storage_prefix)
       cursor = "0"
       loop do
-        cursor, keys = client.scan(cursor, match: "#{prefix}*", count: scan_count)
+        cursor, keys = client.scan(cursor, match: match_pattern(prefix), count: scan_count)
         yield keys
         break if cursor.to_s == "0"
       end
     end
 
     def delete_matching_keys(prefix, single_key: false)
-      if scan_count
-        each_scan_batch(prefix) { |keys| delete_keys(keys, single_key: single_key) }
-      else
-        delete_keys(storage_keys(prefix), single_key: single_key)
-      end
+      delete_keys(storage_keys(prefix), single_key: single_key)
     end
 
     def delete_keys(keys, single_key: false)
@@ -147,6 +177,14 @@ module BetterAuth
       else
         keys.each_slice(DELETE_CHUNK_SIZE) { |chunk| client.del(*chunk) }
       end
+    end
+
+    def match_pattern(prefix)
+      "#{redis_glob_escape(prefix)}*"
+    end
+
+    def redis_glob_escape(value)
+      value.to_s.gsub(/[\\*?\[\]]/) { |character| "\\#{character}" }
     end
 
     def coerce_ttl(ttl)
@@ -170,5 +208,17 @@ module BetterAuth
       seconds = numeric.is_a?(Integer) ? numeric : numeric.to_i
       seconds.positive? ? seconds : nil
     end
+  end
+
+  def self.redis_storage(client:, key_prefix: RedisStorage::UNSET, scan_count: RedisStorage::UNSET, atomic_clear: false, **options)
+    key_prefix_camel = RedisStorage.extract_key_prefix_camel!(options)
+    RedisStorage.reject_unknown_keywords!(options)
+    RedisStorage.new(client: client, key_prefix: key_prefix, key_prefix_camel: key_prefix_camel, scan_count: scan_count, atomic_clear: atomic_clear)
+  end
+
+  def self.redisStorage(client:, key_prefix: RedisStorage::UNSET, scan_count: RedisStorage::UNSET, atomic_clear: false, **options)
+    key_prefix_camel = RedisStorage.extract_key_prefix_camel!(options)
+    RedisStorage.reject_unknown_keywords!(options)
+    RedisStorage.new(client: client, key_prefix: key_prefix, key_prefix_camel: key_prefix_camel, scan_count: scan_count, atomic_clear: atomic_clear)
   end
 end
