@@ -10,6 +10,7 @@ version_files:
   - packages/better_auth-passkey/lib/better_auth/passkey/version.rb
   - packages/better_auth-rails/lib/better_auth/rails/version.rb
   - packages/better_auth-redis-storage/lib/better_auth/redis_storage/version.rb
+  - packages/better_auth-roda/lib/better_auth/roda/version.rb
   - packages/better_auth-scim/lib/better_auth/scim/version.rb
   - packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb
   - packages/better_auth-sso/lib/better_auth/sso/version.rb
@@ -25,6 +26,7 @@ literal_gemspec_versions:
   - packages/openauth-passkey/openauth-passkey.gemspec
   - packages/openauth-rails/openauth-rails.gemspec
   - packages/openauth-redis-storage/openauth-redis-storage.gemspec
+  - packages/openauth-roda/openauth-roda.gemspec
   - packages/openauth-scim/openauth-scim.gemspec
   - packages/openauth-sinatra/openauth-sinatra.gemspec
   - packages/openauth-sso/openauth-sso.gemspec
@@ -48,6 +50,8 @@ pinned_dependencies:
     - better_auth-rails
   packages/openauth-redis-storage/openauth-redis-storage.gemspec:
     - better_auth-redis-storage
+  packages/openauth-roda/openauth-roda.gemspec:
+    - better_auth-roda
   packages/openauth-scim/openauth-scim.gemspec:
     - better_auth-scim
   packages/openauth-sinatra/openauth-sinatra.gemspec:

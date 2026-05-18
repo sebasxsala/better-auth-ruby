@@ -16,6 +16,7 @@ class OpenAuthAliasPackagesTest < Minitest::Test
     "openauth-passkey" => ["better_auth-passkey", "openauth/passkey"],
     "openauth-rails" => ["better_auth-rails", "openauth/rails"],
     "openauth-redis-storage" => ["better_auth-redis-storage", "openauth/redis_storage"],
+    "openauth-roda" => ["better_auth-roda", "openauth/roda"],
     "openauth-scim" => ["better_auth-scim", "openauth/scim"],
     "openauth-sinatra" => ["better_auth-sinatra", "openauth/sinatra"],
     "openauth-sso" => ["better_auth-sso", "openauth/sso"],
@@ -34,6 +35,7 @@ class OpenAuthAliasPackagesTest < Minitest::Test
     Passkey
     Rails
     RedisStorage
+    Roda
     SCIM
     Sinatra
     SSO
@@ -79,6 +81,7 @@ class OpenAuthAliasPackagesTest < Minitest::Test
     assert_same BetterAuth::Plugins, OpenAuth::Plugins
     assert_same BetterAuth::APIKey, OpenAuth::APIKey
     assert_same BetterAuth::Rails, OpenAuth::Rails
+    assert_same BetterAuth::Roda, OpenAuth::Roda
     assert_same BetterAuth::Sinatra, OpenAuth::Sinatra
     assert_same BetterAuth::MongoDB, OpenAuth::MongoDB
   end

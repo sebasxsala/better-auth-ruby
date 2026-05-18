@@ -3,12 +3,12 @@
 require "better_auth/sql_migration"
 
 module BetterAuth
-  module Sinatra
+  module Roda
     module Migration
       DEFAULT_MIGRATIONS_PATH = BetterAuth::SQLMigration::DEFAULT_MIGRATIONS_PATH
       MISSING_MIGRATIONS_TABLE_MESSAGES = BetterAuth::SQLMigration::MISSING_MIGRATIONS_TABLE_MESSAGES
       UnsupportedAdapterError = BetterAuth::SQLMigration::UnsupportedAdapterError
-      GENERATOR = "better_auth-sinatra"
+      GENERATOR = "better_auth-roda"
 
       module_function
 
