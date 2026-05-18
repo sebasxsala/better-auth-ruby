@@ -134,6 +134,23 @@ class BetterAuthRoutesUserTest < Minitest::Test
     assert auth.api.sign_in_email(body: {email: "stale-change-password@example.com", password: "new-password"})[:token]
   end
 
+  def test_change_password_reports_missing_credential_account
+    auth = build_auth
+    user = auth.context.internal_adapter.create_user(email: "social-only-change@example.com", name: "Social", emailVerified: true)
+    auth.context.internal_adapter.create_account(userId: user["id"], providerId: "github", accountId: "gh-social-change")
+    cookie = session_cookie(auth, user)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.change_password(
+        headers: {"cookie" => cookie},
+        body: {currentPassword: "password123", newPassword: "new-password"}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["CREDENTIAL_ACCOUNT_NOT_FOUND"], error.message
+  end
+
   def test_change_email_updates_unverified_user_when_enabled
     auth = build_auth(user: {change_email: {enabled: true, update_email_without_verification: true}})
     cookie = sign_up_cookie(auth, email: "old-email@example.com", password: "password123")
@@ -273,6 +290,21 @@ class BetterAuthRoutesUserTest < Minitest::Test
 
     assert_equal({success: true, message: "User deleted"}, result)
     assert_nil auth.context.internal_adapter.find_user_by_email("stale-password-delete@example.com")
+  end
+
+  def test_delete_user_reports_missing_credential_account_when_password_provided
+    auth = build_auth(user: {delete_user: {enabled: true}})
+    user = auth.context.internal_adapter.create_user(email: "social-only-delete@example.com", name: "Social", emailVerified: true)
+    auth.context.internal_adapter.create_account(userId: user["id"], providerId: "github", accountId: "gh-social-delete")
+    cookie = session_cookie(auth, user)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_user(headers: {"cookie" => cookie}, body: {password: "password123"})
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["CREDENTIAL_ACCOUNT_NOT_FOUND"], error.message
+    assert auth.context.internal_adapter.find_user_by_id(user["id"])
   end
 
   def test_delete_user_sender_receives_callback_url

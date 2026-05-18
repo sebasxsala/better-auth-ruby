@@ -184,7 +184,11 @@ module BetterAuth
 
     def self.set_verified_session_cookie(ctx, user)
       session = current_session(ctx, allow_nil: true)
-      session_data = session ? session[:session] : ctx.context.internal_adapter.create_session(user["id"])
+      session_data = if session && session[:user]["id"] == user["id"]
+        session[:session]
+      else
+        ctx.context.internal_adapter.create_session(user["id"])
+      end
       Cookies.set_session_cookie(ctx, {session: session_data, user: user})
     end
 

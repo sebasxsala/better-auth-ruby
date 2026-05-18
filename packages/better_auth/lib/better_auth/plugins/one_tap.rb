@@ -105,16 +105,20 @@ module BetterAuth
         options[:aud] = audience
         options[:verify_aud] = true
       end
-      payload, = JWT.decode(id_token, nil, true, options.merge(jwks: jwks))
+      payload, = ::JWT.decode(id_token, nil, true, options.merge(jwks: jwks))
       payload
     end
 
     def one_tap_google_jwks
-      uri = URI("https://www.googleapis.com/oauth2/v3/certs")
-      response = Net::HTTP.get_response(uri)
-      raise "Unable to fetch Google JWKS" unless response.is_a?(Net::HTTPSuccess)
+      cached = @one_tap_google_jwks_cache
+      return cached[:jwks] if cached && cached[:expires_at] > Time.now
 
-      JWT::JWK::Set.new(JSON.parse(response.body))
+      payload = HTTPClient.get_json("https://www.googleapis.com/oauth2/v3/certs")
+      raise "Unable to fetch Google JWKS" unless payload
+
+      jwks = ::JWT::JWK::Set.new(payload)
+      @one_tap_google_jwks_cache = {jwks: jwks, expires_at: Time.now + 300}
+      jwks
     end
 
     def one_tap_link_account_unless_present!(ctx, _config, user, payload, id_token)

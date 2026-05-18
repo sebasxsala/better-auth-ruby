@@ -301,6 +301,42 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     assert_equal member.fetch("id"), role.fetch(:member).fetch("id")
   end
 
+  def test_list_members_defaults_limit_and_bulk_loads_users
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(membership_limit: 2)])
+    owner_cookie = sign_up_cookie(auth, email: "limited-members-owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Limited Members", slug: "limited-members"})
+
+    3.times do |index|
+      member_cookie = sign_up_cookie(auth, email: "limited-member-#{index}@example.com")
+      member_user = auth.api.get_session(headers: {"cookie" => member_cookie}).fetch(:user)
+      auth.api.add_member(
+        headers: {"cookie" => owner_cookie},
+        body: {organizationId: organization.fetch("id"), userId: member_user.fetch("id"), role: "member"}
+      )
+    end
+
+    auth.context.internal_adapter.define_singleton_method(:find_user_by_id) do |_user_id|
+      raise "unexpected per-member user lookup"
+    end
+
+    members = auth.api.list_members(headers: {"cookie" => owner_cookie}, query: {organizationId: organization.fetch("id")})
+
+    assert_equal 4, members.fetch(:total)
+    assert_equal 2, members.fetch(:members).length
+    assert members.fetch(:members).all? { |entry| entry.fetch("user").fetch("email").include?("@example.com") }
+  end
+
+  def test_list_members_does_not_call_dynamic_membership_limit
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(membership_limit: ->(_user, _organization) { raise "unexpected dynamic limit call" })])
+    owner_cookie = sign_up_cookie(auth, email: "dynamic-limit-owner@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Dynamic Limit", slug: "dynamic-limit"})
+
+    members = auth.api.list_members(headers: {"cookie" => owner_cookie}, query: {organizationId: organization.fetch("id")})
+
+    assert_equal 1, members.fetch(:total)
+    assert_equal 1, members.fetch(:members).length
+  end
+
   def test_team_limits_membership_checks_and_active_team_clear
     auth = build_auth(plugins: [BetterAuth::Plugins.organization(teams: {enabled: true, maximum_teams: 1, maximum_members_per_team: 1, default_team: {enabled: false}})])
     owner_cookie = sign_up_cookie(auth, email: "team-limit-owner@example.com")

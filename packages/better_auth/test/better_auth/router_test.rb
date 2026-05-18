@@ -158,6 +158,8 @@ class BetterAuthRouterTest < Minitest::Test
 
     assert_equal 404, auth.call(rack_env("POST", "/api/auth/blocked")).first
     assert_equal 404, auth.call(rack_env("POST", "/api/auth/blocked%2F")).first
+    assert_equal 404, auth.call(rack_env("POST", "/api/auth/%62locked")).first
+    assert_equal 404, auth.call(rack_env("POST", "/api/auth/blocked%00")).first
   end
 
   def test_plugin_request_and_response_chain_runs_around_endpoint

@@ -527,14 +527,14 @@ module BetterAuth
       end
     end
 
-    def organization_list_members_endpoint(_config)
+    def organization_list_members_endpoint(config)
       Endpoint.new(path: "/organization/list-members", method: "GET", metadata: organization_openapi("listOrganizationMembers", "List organization members", response: organization_members_response_schema)) do |ctx|
         session = Routes.current_session(ctx)
         query = normalize_hash(ctx.query)
         organization_id = query[:organization_id] || organization_by_slug(ctx, query[:organization_slug])&.fetch("id") || session[:session]["activeOrganizationId"]
         raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("NO_ACTIVE_ORGANIZATION")) unless organization_id
         require_member!(ctx, session[:user]["id"], organization_id)
-        ctx.json(list_members_for(ctx, organization_id, query))
+        ctx.json(list_members_for(ctx, organization_id, query, config, session[:user]))
       end
     end
 
@@ -969,7 +969,7 @@ module BetterAuth
       ctx.context.adapter.find_one(model: "organizationRole", where: [{field: "organizationId", value: organization_id}, {field: "role", value: role}])
     end
 
-    def list_members_for(ctx, organization_id, query = {})
+    def list_members_for(ctx, organization_id, query = {}, config = nil, user = nil)
       where = [{field: "organizationId", value: organization_id}]
       if query[:filter_field]
         where << {field: query[:filter_field], value: query[:filter_value], operator: query[:filter_operator]}
@@ -977,17 +977,46 @@ module BetterAuth
         filter = normalize_hash(query[:filter])
         where << {field: filter[:field], value: filter[:value], operator: filter[:operator]}
       end
+      limit = member_list_limit(ctx, organization_id, query, config, user)
       members = ctx.context.adapter.find_many(
         model: "member",
         where: where,
-        limit: query[:limit],
+        limit: limit,
         offset: query[:offset],
         sort_by: query[:sort_by] ? {field: query[:sort_by], direction: query[:sort_direction] || query[:sort_order] || "asc"} : nil
       )
+      users_by_id = member_users_by_id(ctx, members)
       {
-        members: members.map { |entry| member_wire(ctx, entry) },
+        members: members.map { |entry| member_wire(ctx, entry, users_by_id: users_by_id) },
         total: ctx.context.adapter.count(model: "member", where: where)
       }
+    end
+
+    def member_list_limit(ctx, organization_id, query, config, user)
+      configured = config && config[:membership_limit]
+      configured = 100 if configured.nil?
+      default = numeric_member_limit(configured)
+      default = 100 unless default.positive?
+      requested = query[:limit].to_i if query.key?(:limit) && !query[:limit].to_s.empty?
+      return default unless requested&.positive?
+
+      [requested, default].min
+    end
+
+    def numeric_member_limit(value)
+      return value.to_i if value.is_a?(Numeric)
+      return value.to_i if value.to_s.match?(/\A\d+\z/)
+
+      100
+    end
+
+    def member_users_by_id(ctx, members)
+      user_ids = members.map { |member| member["userId"] }.compact.uniq
+      return {} if user_ids.empty?
+
+      ctx.context.adapter.find_many(model: "user", where: [{field: "id", operator: "in", value: user_ids}]).each_with_object({}) do |user, result|
+        result[user["id"]] = user
+      end
     end
 
     def ensure_team_member_capacity!(ctx, config, team_ids)
@@ -1002,9 +1031,9 @@ module BetterAuth
       end
     end
 
-    def member_wire(ctx, member)
+    def member_wire(ctx, member, users_by_id: nil)
       data = Schema.parse_output(ctx.context.options, "member", member)
-      user = ctx.context.internal_adapter.find_user_by_id(member["userId"])
+      user = users_by_id ? users_by_id[member["userId"]] : ctx.context.internal_adapter.find_user_by_id(member["userId"])
       data["user"] = user.slice("id", "name", "email", "image") if user
       data
     end

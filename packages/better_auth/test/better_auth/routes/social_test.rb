@@ -243,6 +243,25 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal BetterAuth::BASE_ERROR_CODES["INVALID_NEW_USER_CALLBACK_URL"], error.message
   end
 
+  def test_sign_in_social_rejects_disabled_provider
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          enabled: false,
+          create_authorization_url: ->(_data) { "https://github.example/oauth" }
+        }
+      }
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_social(body: {provider: "github"})
+    end
+
+    assert_equal 404, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["PROVIDER_NOT_FOUND"], error.message
+  end
+
   def test_microsoft_id_token_sign_in_uses_custom_verifier
     token = fake_jwt(
       "sub" => "ms-sub",
@@ -450,6 +469,42 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal 302, status
     assert_includes headers.fetch("location"), "error=state_not_found"
     refute called
+  end
+
+  def test_rack_callback_rejects_valid_state_without_initiating_state_cookie
+    called = false
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(data) { "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}" },
+          validate_authorization_code: ->(_data) {
+            called = true
+            {accessToken: "oauth-access"}
+          },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: "gh-state-cookie",
+                email: "state-cookie@example.com",
+                name: "State Cookie",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      }
+    )
+    _status, _headers, body = auth.call(rack_env("POST", "/api/auth/sign-in/social", body: {provider: "github", callbackURL: "/app", disableRedirect: true}))
+    state = URI.decode_www_form(URI.parse(JSON.parse(body.join).fetch("url")).query).assoc("state").last
+
+    status, headers, _body = auth.call(rack_env("GET", "/api/auth/callback/github?code=code&state=#{URI.encode_www_form_component(state)}"))
+
+    assert_equal 302, status
+    assert_includes headers.fetch("location"), "error=state_mismatch"
+    refute headers.fetch("set-cookie", "").include?("better-auth.session_token=")
+    refute called
+    assert_includes headers.fetch("set-cookie"), "better-auth.state="
   end
 
   def test_callback_redirects_new_social_user_to_new_user_callback_url
@@ -1203,6 +1258,40 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal "Account not linked - untrusted provider", error.message
   end
 
+  def test_generic_provider_without_id_token_verifier_rejects_id_token_sign_in
+    provider = BetterAuth::SocialProviders::Base.oauth_provider(
+      id: "example",
+      name: "Example",
+      client_id: "id",
+      client_secret: "secret",
+      authorization_endpoint: "https://provider.example/authorize",
+      token_endpoint: "https://provider.example/token",
+      profile_map: ->(profile) {
+        {
+          id: profile.fetch("sub"),
+          email: profile.fetch("email"),
+          name: profile.fetch("name"),
+          emailVerified: true
+        }
+      }
+    )
+    auth = build_auth(social_providers: {example: provider})
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.sign_in_social(
+        body: {
+          provider: "example",
+          idToken: {
+            token: fake_jwt("sub" => "example-sub", "email" => "example@example.com", "name" => "Example")
+          }
+        }
+      )
+    end
+
+    assert_equal 404, error.status_code
+    assert_equal BetterAuth::BASE_ERROR_CODES["ID_TOKEN_NOT_SUPPORTED"], error.message
+  end
+
   private
 
   def build_auth(options = {})
@@ -1222,5 +1311,24 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     encoded_header = Base64.urlsafe_encode64(JSON.generate({"alg" => "none"}), padding: false)
     encoded_payload = Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
     "#{encoded_header}.#{encoded_payload}."
+  end
+
+  def rack_env(method, path, body: nil, cookie: nil)
+    path_info, query_string = path.split("?", 2)
+    payload = body ? JSON.generate(body) : ""
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path_info,
+      "QUERY_STRING" => query_string || "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(payload),
+      "CONTENT_TYPE" => body ? "application/json" : nil,
+      "CONTENT_LENGTH" => payload.bytesize.to_s,
+      "HTTP_COOKIE" => cookie,
+      "HTTP_ORIGIN" => "http://localhost:3000"
+    }.compact
   end
 end

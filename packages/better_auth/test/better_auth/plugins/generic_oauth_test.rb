@@ -322,6 +322,18 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
     assert_includes state_cookie, "Max-Age=0"
   end
 
+  def test_database_state_strategy_rejects_rack_callback_without_state_cookie
+    auth = build_auth(on_api_error: {error_url: "/error"})
+    _status, _headers, body = auth.call(rack_env("POST", "/api/auth/sign-in/oauth2", body: {providerId: "custom", callbackURL: "/dashboard"}))
+    state = Rack::Utils.parse_query(URI.parse(JSON.parse(body.join).fetch("url")).query).fetch("state")
+
+    callback_status, callback_headers, = auth.call(rack_env("GET", "/api/auth/oauth2/callback/custom?code=oauth-code&state=#{URI.encode_www_form_component(state)}"))
+
+    assert_equal 302, callback_status
+    assert_equal "/error?error=state_mismatch", callback_headers.fetch("location")
+    refute auth.context.internal_adapter.find_account_by_provider_id("oauth-sub", "custom")
+  end
+
   def test_cookie_state_strategy_uses_oauth_state_cookie
     auth = build_auth(account: {store_state_strategy: "cookie"})
     status, headers, body = auth.api.sign_in_with_oauth2(
@@ -862,6 +874,25 @@ class BetterAuthPluginsGenericOAuthTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_env(method, path, body: nil, cookie: nil)
+    path_info, query_string = path.split("?", 2)
+    payload = body ? JSON.generate(body) : ""
+    {
+      "REQUEST_METHOD" => method,
+      "PATH_INFO" => path_info,
+      "QUERY_STRING" => query_string || "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "REMOTE_ADDR" => "127.0.0.1",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(payload),
+      "CONTENT_TYPE" => body ? "application/json" : nil,
+      "CONTENT_LENGTH" => payload.bytesize.to_s,
+      "HTTP_COOKIE" => cookie,
+      "HTTP_ORIGIN" => "http://localhost:3000"
+    }.compact
   end
 
   def cookie_header_without_account_data(set_cookie, auth)

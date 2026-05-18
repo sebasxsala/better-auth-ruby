@@ -103,7 +103,7 @@ module BetterAuth
       else
         URI.encode_www_form(verifier[:payload])
       end
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       raise CAPTCHA_INTERNAL_ERROR_CODES["SERVICE_UNAVAILABLE"] unless response.is_a?(Net::HTTPSuccess)
 
       JSON.parse(response.body.to_s)

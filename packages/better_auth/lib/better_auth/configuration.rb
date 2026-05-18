@@ -75,7 +75,7 @@ module BetterAuth
       @hooks = options[:hooks]
       @on_api_error = symbolize_keys(options[:on_api_error] || options[:on_apierror] || {})
       @telemetry = symbolize_keys(options[:telemetry] || {})
-      @social_providers = symbolize_keys(options[:social_providers] || {})
+      @social_providers = normalize_social_providers(options[:social_providers])
       @trusted_origins_callbacks = []
       @trusted_origins_callbacks << options[:trusted_origins] if options[:trusted_origins].respond_to?(:call)
       @trusted_origins_callback = combined_trusted_origins_callback
@@ -369,6 +369,12 @@ module BetterAuth
 
     def normalize_plugins(value)
       Array(value).compact.reject { |plugin| plugin == false }.map { |plugin| Plugin.coerce(plugin) }
+    end
+
+    def normalize_social_providers(value)
+      symbolize_keys(value || {}).reject do |_id, provider|
+        provider.nil? || provider == false || (provider.is_a?(Hash) && provider[:enabled] == false)
+      end
     end
 
     def normalize_trusted_origins(value)

@@ -83,7 +83,7 @@ module BetterAuth
       request = Net::HTTP::Get.new(uri)
       request["Add-Padding"] = "true"
       request["User-Agent"] = "BetterAuth Password Checker"
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(request) }
+      response = HTTPClient.request(uri, request)
       unless response.is_a?(Net::HTTPSuccess)
         raise APIError.new("INTERNAL_SERVER_ERROR", message: "Failed to check password. Status: #{response.code}")
       end

@@ -179,6 +179,7 @@ module BetterAuth
         path: "/verify-password",
         method: "POST",
         metadata: {
+          scope: "server",
           openapi: {
             operationId: "verifyPassword",
             description: "Verify the current user's password",

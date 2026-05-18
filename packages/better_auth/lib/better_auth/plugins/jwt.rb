@@ -279,9 +279,15 @@ module BetterAuth
       payload = if fetcher.respond_to?(:call)
         fetcher.call(url)
       else
-        uri = URI.parse(url.to_s)
-        response = Net::HTTP.get_response(uri)
-        response.is_a?(Net::HTTPSuccess) ? JSON.parse(response.body) : nil
+        cached = @jwt_remote_jwks_cache ||= {}
+        entry = cached[url.to_s]
+        if entry && entry[:expires_at] > Time.now
+          entry[:payload]
+        else
+          fetched = HTTPClient.get_json(url)
+          cached[url.to_s] = {payload: fetched, expires_at: Time.now + 300} if fetched
+          fetched
+        end
       end
       keys = fetch_value(payload, "keys")
       Array(keys).map { |entry| normalize_remote_jwk(entry) }

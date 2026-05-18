@@ -28,7 +28,7 @@ module BetterAuth
         },
         **options
       )
-      provider[:verify_id_token] = provider[:options][:verify_id_token] || ->(token, _nonce = nil) { provider[:options][:disable_id_token_sign_in] ? false : !token.to_s.empty? }
+      provider.delete(:verify_id_token) unless provider[:verify_id_token]
       provider
     end
   end

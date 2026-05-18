@@ -7,6 +7,7 @@ require "net/http"
 require "openssl"
 require "time"
 require "uri"
+require_relative "../http_client"
 
 module BetterAuth
   module SocialProviders
@@ -67,11 +68,7 @@ module BetterAuth
               client_secret: client_secret
             )
           end,
-          verify_id_token: opts[:verify_id_token] || lambda do |token, _nonce = nil|
-            return false if opts[:disable_id_token_sign_in]
-
-            !decode_jwt_payload(token).empty?
-          end,
+          verify_id_token: opts[:verify_id_token],
           get_user_info: lambda do |tokens|
             custom = opts[:get_user_info]
             profile = if custom
@@ -277,7 +274,7 @@ module BetterAuth
         return nil if max_age && payload["iat"] && payload["iat"].to_i < Time.now.to_i - max_age.to_i
 
         payload
-      rescue JWT::DecodeError, JSON::ParserError, ArgumentError, OpenSSL::PKey::PKeyError
+      rescue JWT::DecodeError, JSON::ParserError, ArgumentError, OpenSSL::PKey::PKeyError, Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError
         nil
       end
 
@@ -312,9 +309,7 @@ module BetterAuth
       end
 
       def request_json(uri, request)
-        Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) do |http|
-          http.request(request)
-        end
+        HTTPClient.request(uri, request)
       end
 
       def padded_base64(value)
