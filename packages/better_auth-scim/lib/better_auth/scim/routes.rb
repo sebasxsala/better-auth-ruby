@@ -34,7 +34,7 @@ module BetterAuth
 
         existing = ctx.context.adapter.find_one(model: "scimProvider", where: [{field: "providerId", value: provider_id}])
         if existing
-          scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), existing, required_roles)
+          scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), existing, required_roles, config)
           ctx.context.adapter.delete(model: "scimProvider", where: [{field: "id", value: existing.fetch("id")}])
         end
 
@@ -61,6 +61,8 @@ module BetterAuth
           if organization_id
             member = org_memberships[organization_id]
             member && scim_has_required_role?(member.fetch("role", ""), required_roles)
+          elsif scim_provider_ownership_enabled?(config)
+            provider["userId"] == user_id
           else
             !provider.key?("userId") || provider["userId"].nil? || provider["userId"] == user_id
           end
@@ -73,7 +75,7 @@ module BetterAuth
       Endpoint.new(path: "/scim/get-provider-connection", method: "GET", metadata: scim_openapi_metadata("Get SCIM provider connection.")) do |ctx|
         session = Routes.current_session(ctx)
         provider = scim_provider_by_provider_id!(ctx, scim_provider_id_query(ctx))
-        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config))
+        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config), config)
         ctx.json(scim_normalized_provider(provider))
       end
     end
@@ -83,7 +85,7 @@ module BetterAuth
         session = Routes.current_session(ctx)
         body = normalize_hash(ctx.body)
         provider = scim_provider_by_provider_id!(ctx, body[:provider_id])
-        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config))
+        scim_assert_provider_access!(ctx, session.fetch(:user).fetch("id"), provider, scim_required_roles(ctx, config), config)
         ctx.context.adapter.delete(model: "scimProvider", where: [{field: "providerId", value: provider.fetch("providerId")}])
         ctx.json({success: true})
       end
@@ -168,8 +170,12 @@ module BetterAuth
 
     def scim_delete_user_endpoint(config)
       Endpoint.new(path: "/scim/v2/Users/:userId", method: "DELETE", metadata: scim_hidden_metadata("Delete SCIM user.", [*SCIM_SUPPORTED_MEDIA_TYPES, ""]), use: [scim_auth_middleware(config)]) do |ctx|
-        user, = scim_find_user_with_account!(ctx)
-        ctx.context.internal_adapter.delete_user(user.fetch("id"))
+        user, account = scim_find_user_with_account!(ctx)
+        ctx.context.adapter.transaction do
+          ctx.context.internal_adapter.delete_account(account.fetch("id"))
+          remaining_accounts = ctx.context.internal_adapter.find_accounts(user.fetch("id"))
+          ctx.context.internal_adapter.delete_user(user.fetch("id")) if remaining_accounts.empty?
+        end
         ctx.json(nil, status: 204)
       end
     end
@@ -177,9 +183,14 @@ module BetterAuth
     def scim_list_users_endpoint(config)
       Endpoint.new(path: "/scim/v2/Users", method: "GET", metadata: scim_hidden_metadata("List SCIM users.", SCIM_SUPPORTED_MEDIA_TYPES), use: [scim_auth_middleware(config)]) do |ctx|
         provider = ctx.context.scim_provider
+        filter_value = nil
+        if ctx.query[:filter] || ctx.query["filter"]
+          _filter_field, filter_value = scim_parse_filter(ctx.query[:filter] || ctx.query["filter"])
+        end
+        start_index, count = scim_list_pagination(ctx.query)
+        empty_list = {schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: 0, itemsPerPage: 0, startIndex: start_index, Resources: []}
         accounts = ctx.context.adapter.find_many(model: "account", where: [{field: "providerId", value: provider.fetch("providerId")}])
         account_user_ids = accounts.map { |account| account.fetch("userId") }.uniq
-        empty_list = {schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: 0, itemsPerPage: 0, startIndex: 1, Resources: []}
         if account_user_ids.empty?
           ctx.json(empty_list)
         else
@@ -198,15 +209,15 @@ module BetterAuth
             ctx.json(empty_list)
           else
             where = [{field: "id", value: user_ids, operator: "in"}]
-            if ctx.query[:filter] || ctx.query["filter"]
-              _filter_field, filter_value = scim_parse_filter(ctx.query[:filter] || ctx.query["filter"])
+            if filter_value
               where << {field: "email", value: filter_value.to_s.downcase, operator: "eq"}
             end
 
-            users = ctx.context.internal_adapter.list_users(where: where, sort_by: {field: "email", direction: "asc"})
+            total_results = ctx.context.internal_adapter.count_total_users(where: where)
+            users = ctx.context.internal_adapter.list_users(where: where, sort_by: {field: "email", direction: "asc"}, limit: count, offset: start_index - 1)
             accounts_by_user = accounts.each_with_object({}) { |account, result| result[account.fetch("userId")] ||= account }
             resources = users.map { |user| scim_user_resource(user, accounts_by_user[user.fetch("id")], ctx.context.base_url) }
-            ctx.json({schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: resources.length, itemsPerPage: resources.length, startIndex: 1, Resources: resources})
+            ctx.json({schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: total_results, itemsPerPage: resources.length, startIndex: start_index, Resources: resources})
           end
         end
       end
@@ -292,6 +303,28 @@ module BetterAuth
       raise scim_error("NOT_FOUND", "User not found") unless user && account
 
       [user, account]
+    end
+
+    def scim_list_pagination(query)
+      start_index = scim_positive_integer(query[:startIndex] || query[:start_index] || query["startIndex"] || query["start_index"], 1)
+      count = if query.key?(:count) || query.key?("count")
+        scim_non_negative_integer(query[:count] || query["count"], 0)
+      end
+      [start_index, count]
+    end
+
+    def scim_positive_integer(value, fallback)
+      parsed = Integer(value)
+      parsed.positive? ? parsed : fallback
+    rescue ArgumentError, TypeError
+      fallback
+    end
+
+    def scim_non_negative_integer(value, fallback)
+      parsed = Integer(value)
+      parsed.negative? ? fallback : parsed
+    rescue ArgumentError, TypeError
+      fallback
     end
   end
 end

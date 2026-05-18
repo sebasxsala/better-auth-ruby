@@ -248,9 +248,10 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
       )
     end
     assert_equal 400, invalid_op.status_code
-    assert_equal "Validation Error", invalid_op.message
-    assert_equal "VALIDATION_ERROR", invalid_op.body.fetch(:code)
-    assert_match(/body\.Operations\.0\.op/, invalid_op.body.fetch(:message))
+    assert_equal '[body.Operations.0.op] Invalid option: expected one of "replace"|"add"|"remove"', invalid_op.message
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:Error"], invalid_op.body.fetch(:schemas)
+    assert_equal "400", invalid_op.body.fetch(:status)
+    assert_match(/body\.Operations\.0\.op/, invalid_op.body.fetch(:detail))
 
     non_string_op = assert_raises(BetterAuth::APIError) do
       auth.api.patch_scim_user(
@@ -260,8 +261,8 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
       )
     end
     assert_equal 400, non_string_op.status_code
-    assert_equal "Validation Error", non_string_op.message
-    assert_equal "VALIDATION_ERROR", non_string_op.body.fetch(:code)
+    assert_equal "[body.Operations.0.op] Invalid input: expected string", non_string_op.message
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:Error"], non_string_op.body.fetch(:schemas)
   end
 
   def test_scim_patch_rejects_add_on_non_existing_path
@@ -283,5 +284,45 @@ class BetterAuthPluginsScimPatchTest < Minitest::Test
     end
     assert_equal 400, error.status_code
     assert_equal "No valid fields to update", error.message
+  end
+
+  def test_scim_patch_rejects_excessive_operations
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(headers: headers, body: {userName: "too-many-ops@example.com"})
+    operations = Array.new(101) { {op: "replace", path: "userName", value: "ignored@example.com"} }
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], Operations: operations}
+      )
+    end
+    assert_equal 400, error.status_code
+    assert_equal "Too many SCIM patch operations", error.message
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:Error"], error.body.fetch(:schemas)
+  end
+
+  def test_scim_patch_rejects_excessively_nested_values
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "okta"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(headers: headers, body: {userName: "deep@example.com"})
+    deep_value = {name: {a: {b: {c: {d: {e: {f: "too-deep"}}}}}}}
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.patch_scim_user(
+        headers: headers,
+        params: {userId: created.fetch(:id)},
+        body: {schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], Operations: [{op: "replace", value: deep_value}]}
+      )
+    end
+    assert_equal 400, error.status_code
+    assert_equal "SCIM patch value is too deeply nested", error.message
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:Error"], error.body.fetch(:schemas)
   end
 end

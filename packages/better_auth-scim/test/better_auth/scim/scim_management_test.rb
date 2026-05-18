@@ -34,7 +34,47 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
 
     refute_equal response.fetch(:scimToken), stored.fetch("scimToken")
     assert_match(/\A[A-Za-z0-9_-]{43}\z/, stored.fetch("scimToken"))
+    assert_equal auth.api.get_session(headers: {"cookie" => cookie}).fetch(:user).fetch("id"), stored.fetch("userId")
     assert auth.api.create_scim_user(headers: bearer(response.fetch(:scimToken)), body: {userName: "default-hashed@example.com"})
+  end
+
+  def test_scim_provider_ownership_is_enabled_by_default_for_personal_providers
+    auth = build_auth
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    other_cookie = sign_up_cookie(auth, "other@example.com")
+
+    auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "personal-default"})
+
+    assert_equal ["personal-default"], auth.api.list_scim_provider_connections(headers: {"cookie" => owner_cookie}).fetch(:providers).map { |provider| provider.fetch(:providerId) }
+    assert_equal [], auth.api.list_scim_provider_connections(headers: {"cookie" => other_cookie}).fetch(:providers)
+
+    get_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_scim_provider_connection(headers: {"cookie" => other_cookie}, query: {providerId: "personal-default"})
+    end
+    assert_equal 403, get_error.status_code
+    assert_equal "You must be the owner to access this provider", get_error.message
+
+    delete_error = assert_raises(BetterAuth::APIError) do
+      auth.api.delete_scim_provider_connection(headers: {"cookie" => other_cookie}, body: {providerId: "personal-default"})
+    end
+    assert_equal 403, delete_error.status_code
+
+    rotate_error = assert_raises(BetterAuth::APIError) do
+      auth.api.generate_scim_token(headers: {"cookie" => other_cookie}, body: {providerId: "personal-default"})
+    end
+    assert_equal 403, rotate_error.status_code
+  end
+
+  def test_scim_provider_ownership_can_be_disabled_for_legacy_shared_personal_providers
+    auth = build_auth(provider_ownership: {enabled: false})
+    owner_cookie = sign_up_cookie(auth, "legacy-owner@example.com")
+    other_cookie = sign_up_cookie(auth, "legacy-other@example.com")
+
+    auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "legacy-personal"})
+
+    assert_equal ["legacy-personal"], auth.api.list_scim_provider_connections(headers: {"cookie" => other_cookie}).fetch(:providers).map { |provider| provider.fetch(:providerId) }
+    assert_equal "legacy-personal", auth.api.get_scim_provider_connection(headers: {"cookie" => other_cookie}, query: {providerId: "legacy-personal"}).fetch(:providerId)
+    assert_equal true, auth.api.delete_scim_provider_connection(headers: {"cookie" => other_cookie}, body: {providerId: "legacy-personal"}).fetch(:success)
   end
 
   def test_scim_tokens_use_upstream_envelope_storage_and_encrypted_modes
@@ -110,6 +150,32 @@ class BetterAuthPluginsScimManagementTest < Minitest::Test
 
     token = auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "okta", organizationId: org.fetch("id")})
     assert_kind_of String, token.fetch(:scimToken)
+  end
+
+  def test_scim_rejects_org_scoped_database_tokens_without_org_envelope
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization, BetterAuth::Plugins.scim])
+    owner_cookie = sign_up_cookie(auth, "owner@example.com")
+    org = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Scoped", slug: "scoped"})
+    token = auth.api.generate_scim_token(headers: {"cookie" => owner_cookie}, body: {providerId: "scoped-okta", organizationId: org.fetch("id")}).fetch(:scimToken)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_scim_users(headers: bearer(token_without_organization(token)))
+    end
+    assert_equal 401, error.status_code
+    assert_equal "Invalid SCIM token", error.message
+  end
+
+  def test_scim_rejects_org_scoped_default_tokens_without_org_envelope
+    token = Base64.urlsafe_encode64("default-token:default-provider:org-1", padding: false)
+    auth = build_auth(default_scim: [{providerId: "default-provider", scimToken: "default-token", organizationId: "org-1"}])
+
+    assert_equal 0, auth.api.list_scim_users(headers: bearer(token)).fetch(:totalResults)
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_scim_users(headers: bearer(token_without_organization(token)))
+    end
+    assert_equal 401, error.status_code
+    assert_equal "Invalid SCIM token", error.message
   end
 
   def test_scim_generate_token_requires_string_provider_id

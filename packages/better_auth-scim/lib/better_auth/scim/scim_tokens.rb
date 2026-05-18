@@ -48,7 +48,7 @@ module BetterAuth
     def scim_default_provider(config, provider_id, organization_id)
       Array(config[:default_scim]).find do |provider|
         candidate = normalize_hash(provider)
-        next true if candidate[:provider_id].to_s == provider_id.to_s && organization_id.to_s.empty?
+        next true if candidate[:provider_id].to_s == provider_id.to_s && organization_id.to_s.empty? && candidate[:organization_id].to_s.empty?
 
         candidate[:provider_id].to_s == provider_id.to_s &&
           !organization_id.to_s.empty? &&

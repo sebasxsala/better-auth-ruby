@@ -24,7 +24,7 @@ module BetterAuth
     singleton_class.remove_method(:scim) if singleton_class.method_defined?(:scim) || singleton_class.private_method_defined?(:scim)
 
     def scim(options = {})
-      config = {store_scim_token: "hashed"}.merge(normalize_hash(options))
+      config = {store_scim_token: "hashed", provider_ownership: {enabled: true}}.merge(normalize_hash(options))
       Plugin.new(
         id: "scim",
         version: BetterAuth::SCIM::VERSION,

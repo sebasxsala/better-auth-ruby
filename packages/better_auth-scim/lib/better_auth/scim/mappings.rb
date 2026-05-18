@@ -5,9 +5,10 @@ module BetterAuth
     module_function
 
     def scim_user_update(body)
+      email = scim_primary_email(body)&.downcase
       {
-        email: scim_primary_email(body)&.downcase,
-        name: scim_display_name(body, body[:user_name].to_s),
+        email: email,
+        name: scim_display_name(body, email),
         updatedAt: Time.now
       }.compact
     end

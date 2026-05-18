@@ -23,6 +23,7 @@ module BetterAuth
             where: [{field: "providerId", value: provider_id}].tap { |where| where << {field: "organizationId", value: organization_id} if organization_id }
           )
           raise scim_error("UNAUTHORIZED", "Invalid SCIM token") unless provider
+          raise scim_error("UNAUTHORIZED", "Invalid SCIM token") unless provider["organizationId"].to_s == organization_id.to_s
           raise scim_error("UNAUTHORIZED", "Invalid SCIM token") unless scim_token_matches?(ctx, config, token, provider.fetch("scimToken"))
         end
 

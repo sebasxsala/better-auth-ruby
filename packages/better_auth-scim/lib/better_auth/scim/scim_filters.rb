@@ -6,7 +6,7 @@ module BetterAuth
 
     def scim_parse_filter(filter)
       match = filter.to_s.match(/\A\s*([^\s]+)\s+(eq|ne|co|sw|ew|pr)\s*(?:"([^"]*)"|([^\s]+))?\s*\z/i)
-      raise scim_error("BAD_REQUEST", "Invalid SCIM filter", scim_type: "invalidFilter") unless match
+      raise scim_error("BAD_REQUEST", "Invalid filter expression", scim_type: "invalidFilter") unless match
 
       field = match[1]
       operator = match[2].downcase

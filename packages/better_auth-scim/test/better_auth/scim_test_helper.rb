@@ -30,4 +30,9 @@ module SCIMTestHelper
   def bearer(token)
     {"authorization" => "Bearer " + token}
   end
+
+  def token_without_organization(token)
+    token_parts = Base64.urlsafe_decode64(token).split(":")
+    Base64.urlsafe_encode64(token_parts[0, 2].join(":"), padding: false)
+  end
 end

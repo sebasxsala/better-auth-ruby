@@ -49,7 +49,7 @@ module BetterAuth
       end
     end
 
-    def scim_assert_provider_access!(ctx, user_id, provider, required_roles)
+    def scim_assert_provider_access!(ctx, user_id, provider, required_roles, config = {})
       return unless provider
 
       organization_id = provider["organizationId"]
@@ -59,6 +59,8 @@ module BetterAuth
         member = scim_find_organization_member(ctx, user_id, organization_id)
         raise APIError.new("FORBIDDEN", message: "You must be a member of the organization to access this provider") unless member
         raise APIError.new("FORBIDDEN", message: "Insufficient role for this operation") unless scim_has_required_role?(member.fetch("role", ""), required_roles)
+      elsif scim_provider_ownership_enabled?(config)
+        raise APIError.new("FORBIDDEN", message: "You must be the owner to access this provider") unless provider["userId"] == user_id
       elsif provider.key?("userId") && provider["userId"] && provider["userId"] != user_id
         raise APIError.new("FORBIDDEN", message: "You must be the owner to access this provider")
       end

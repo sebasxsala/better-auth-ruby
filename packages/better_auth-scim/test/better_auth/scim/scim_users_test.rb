@@ -72,6 +72,45 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
     assert_equal [user_a, user_b], users.fetch(:Resources)
   end
 
+  def test_scim_list_users_supports_start_index_and_count_pagination
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "paged"}).fetch(:scimToken)
+    headers = bearer(token)
+
+    auth.api.create_scim_user(headers: headers, body: {userName: "charlie@example.com"})
+    auth.api.create_scim_user(headers: headers, body: {userName: "alpha@example.com"})
+    auth.api.create_scim_user(headers: headers, body: {userName: "bravo@example.com"})
+
+    page = auth.api.list_scim_users(headers: headers, query: {startIndex: "2", count: "1"})
+    assert_equal 3, page.fetch(:totalResults)
+    assert_equal 2, page.fetch(:startIndex)
+    assert_equal 1, page.fetch(:itemsPerPage)
+    assert_equal ["bravo@example.com"], page.fetch(:Resources).map { |user| user.fetch(:userName) }
+
+    beyond = auth.api.list_scim_users(headers: headers, query: {startIndex: "10", count: "2"})
+    assert_equal 3, beyond.fetch(:totalResults)
+    assert_equal 10, beyond.fetch(:startIndex)
+    assert_equal 0, beyond.fetch(:itemsPerPage)
+    assert_equal [], beyond.fetch(:Resources)
+  end
+
+  def test_scim_list_users_paginates_filtered_results
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "filtered-page"}).fetch(:scimToken)
+    headers = bearer(token)
+
+    auth.api.create_scim_user(headers: headers, body: {userName: "match@example.com"})
+    auth.api.create_scim_user(headers: headers, body: {userName: "other@example.com"})
+
+    page = auth.api.list_scim_users(headers: headers, query: {filter: 'userName eq "MATCH@example.com"', startIndex: 1, count: 1})
+    assert_equal 1, page.fetch(:totalResults)
+    assert_equal 1, page.fetch(:startIndex)
+    assert_equal 1, page.fetch(:itemsPerPage)
+    assert_equal ["match@example.com"], page.fetch(:Resources).map { |user| user.fetch(:userName) }
+  end
+
   def test_scim_list_users_orders_by_user_name
     auth = build_auth
     cookie = sign_up_cookie(auth)
@@ -123,6 +162,27 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
     end
     assert_equal 400, missing_value.status_code
     assert_equal "Invalid filter expression", missing_value.message
+
+    malformed = assert_raises(BetterAuth::APIError) do
+      auth.api.list_scim_users(headers: headers, query: {filter: "("})
+    end
+    assert_equal 400, malformed.status_code
+    assert_equal "Invalid filter expression", malformed.message
+  end
+
+  def test_scim_invalid_filter_returns_error_even_when_provider_has_no_users
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "empty"}).fetch(:scimToken)
+
+    status, _headers, body = auth.api.list_scim_users(as_response: true, headers: bearer(token), query: {filter: 'externalId eq "x"'})
+    error = JSON.parse(body.join)
+
+    assert_equal 400, status
+    assert_equal ["urn:ietf:params:scim:api:messages:2.0:Error"], error.fetch("schemas")
+    assert_equal "400", error.fetch("status")
+    assert_equal "The attribute \"externalId\" is not supported", error.fetch("detail")
+    assert_equal "invalidFilter", error.fetch("scimType")
   end
 
   def test_scim_default_provider_and_invalid_tokens
@@ -187,6 +247,46 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
       auth.api.get_scim_user(headers: bearer(token_b), params: {userId: user_b.fetch(:id)})
     end
     assert_equal 404, deleted.status_code
+  end
+
+  def test_scim_delete_unlinks_only_current_provider_when_user_has_other_accounts
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token_a = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "provider-a"}).fetch(:scimToken)
+    token_b = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "provider-b"}).fetch(:scimToken)
+
+    user_a = auth.api.create_scim_user(headers: bearer(token_a), body: {userName: "shared@example.com", externalId: "external-a"})
+    user_b = auth.api.create_scim_user(headers: bearer(token_b), body: {userName: "shared@example.com", externalId: "external-b"})
+    assert_equal user_a.fetch(:id), user_b.fetch(:id)
+
+    assert_equal 204, auth.api.delete_scim_user(headers: bearer(token_a), params: {userId: user_a.fetch(:id)}, return_status: true).fetch(:status)
+
+    provider_a_error = assert_raises(BetterAuth::APIError) do
+      auth.api.get_scim_user(headers: bearer(token_a), params: {userId: user_a.fetch(:id)})
+    end
+    assert_equal 404, provider_a_error.status_code
+
+    still_linked = auth.api.get_scim_user(headers: bearer(token_b), params: {userId: user_b.fetch(:id)})
+    assert_equal "shared@example.com", still_linked.fetch(:userName)
+    assert_equal "external-b", still_linked.fetch(:externalId)
+  end
+
+  def test_scim_update_user_display_name_falls_back_to_selected_email
+    auth = build_auth
+    cookie = sign_up_cookie(auth)
+    token = auth.api.generate_scim_token(headers: {"cookie" => cookie}, body: {providerId: "put-fallback"}).fetch(:scimToken)
+    headers = bearer(token)
+    created = auth.api.create_scim_user(headers: headers, body: {userName: "original@example.com"})
+
+    updated = auth.api.update_scim_user(
+      headers: headers,
+      params: {userId: created.fetch(:id)},
+      body: {userName: "external-id", emails: [{value: "selected@example.com"}]}
+    )
+
+    assert_equal "selected@example.com", updated.fetch(:userName)
+    assert_equal "selected@example.com", updated.fetch(:displayName)
+    assert_equal({formatted: "selected@example.com"}, updated.fetch(:name))
   end
 
   def test_scim_org_scoping_empty_lists_and_missing_or_anonymous_access
