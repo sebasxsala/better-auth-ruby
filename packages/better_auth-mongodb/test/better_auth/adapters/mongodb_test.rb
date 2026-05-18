@@ -205,6 +205,40 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal({"$limit" => 3}, lookup.fetch("pipeline").last)
   end
 
+  def test_mongodb_joined_queries_limit_base_records_before_lookup
+    3.times do |index|
+      user = @adapter.create(model: "user", data: {id: "user-#{index}", name: "User #{index}", email: "user-#{index}@example.com"}, force_allow_id: true)
+      @adapter.create(model: "session", data: {id: "session-#{index}", token: "token-#{index}", userId: user.fetch("id"), expiresAt: Time.now + 60}, force_allow_id: true)
+    end
+
+    @adapter.find_one(model: "user", join: {session: true})
+    find_one_pipeline = @database.collection("user").aggregate_pipelines.last.first
+    assert_operator find_one_pipeline.index { |stage| stage.key?("$limit") }, :<, find_one_pipeline.index { |stage| stage.key?("$lookup") }
+
+    @adapter.find_many(model: "user", join: {session: true}, sort_by: {field: "email", direction: "asc"}, offset: 1, limit: 1)
+    find_many_pipeline = @database.collection("user").aggregate_pipelines.last.first
+    lookup_index = find_many_pipeline.index { |stage| stage.key?("$lookup") }
+    assert_operator find_many_pipeline.index { |stage| stage.key?("$sort") }, :<, lookup_index
+    assert_operator find_many_pipeline.index { |stage| stage.key?("$skip") }, :<, lookup_index
+    assert_operator find_many_pipeline.index { |stage| stage.key?("$limit") }, :<, lookup_index
+  end
+
+  def test_mongodb_adapter_rejects_invalid_limits_and_offsets
+    assert_bad_request { @adapter.find_many(model: "user", limit: 0) }
+    assert_bad_request { @adapter.find_many(model: "user", limit: -1) }
+    assert_bad_request { @adapter.find_many(model: "user", offset: -1) }
+    assert_bad_request { @adapter.find_many(model: "user", join: {session: {limit: 0}}) }
+    assert_bad_request { @adapter.find_many(model: "user", join: {session: {limit: -1}}) }
+
+    database = FakeMongoDatabase.new
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {default_find_many_limit: 0}})
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: database)
+
+    adapter.find_many(model: "user")
+
+    assert_equal({"$limit" => 100}, database.collection("user").aggregate_pipelines.last.first.last)
+  end
+
   def test_mongodb_where_connectors_use_upstream_and_or_buckets
     @adapter.find_many(
       model: "user",
@@ -271,6 +305,13 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal "INVALID_ID", error.code
   end
 
+  def test_mongodb_adapter_rejects_malformed_where_and_join_inputs
+    assert_bad_request { @adapter.find_many(model: "user", where: [nil]) }
+    assert_bad_request { @adapter.find_many(model: "user", where: "bad") }
+    assert_bad_request { @adapter.find_many(model: "user", join: true) }
+    assert_bad_request { @adapter.find_many(model: "user", join: {session: {on: {from: "id"}}}) }
+  end
+
   def test_mongodb_adapter_supports_select_update_update_many_delete_and_delete_many
     @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     @adapter.create(model: "user", data: {id: "user-2", name: "Grace", email: "grace@example.com"}, force_allow_id: true)
@@ -298,6 +339,45 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
     assert_equal "verification-1", updated.fetch("id")
     assert_equal "new", updated.fetch("value")
+  end
+
+  def test_mongodb_adapter_rejects_empty_update_payloads_before_calling_mongo
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    collection = @database.collection("user")
+
+    assert_bad_request { @adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {id: "ignored"}) }
+    assert_bad_request { @adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {id: nil}) }
+    assert_bad_request { @adapter.update_many(model: "user", where: [], update: {unknownField: "ignored"}) }
+
+    assert_empty collection.find_one_and_update_calls
+    assert_empty collection.update_many_calls
+  end
+
+  def test_mongodb_adapter_strips_id_from_valid_update_payloads
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+
+    @adapter.update(model: "user", where: [{field: "id", value: "user-1"}], update: {id: "attempted-change", name: "Augusta"})
+
+    update_doc = @database.collection("user").find_one_and_update_calls.last[1].fetch("$set")
+    refute update_doc.key?("_id")
+    assert_equal "Augusta", update_doc.fetch("name")
+  end
+
+  def test_mongodb_adapter_rejects_invalid_date_strings
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {
+        additional_fields: {
+          dateField: {type: "date", required: false}
+        }
+      }
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    assert_bad_request do
+      adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com", dateField: "not-a-date"}, force_allow_id: true)
+    end
   end
 
   def test_mongodb_adapter_supports_core_joins
@@ -601,11 +681,33 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: ["7", "8"]}])
     assert_equal({"score" => {"$in" => [7, 8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
 
-    adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
-    assert_equal({"score" => {"$in" => [7]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+    assert_bad_request do
+      adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
+    end
 
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "not_in", value: "8"}])
     assert_equal({"score" => {"$nin" => [8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+  end
+
+  def test_mongodb_adapter_stores_default_plugin_fields_as_snake_case
+    plugin = {
+      id: "storage-name-parity",
+      schema: {
+        storageModel: {
+          fields: {
+            camelCaseField: {type: "string", required: false}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+
+    adapter.create(model: "storageModel", data: {camelCaseField: "value"})
+    stored = @database.collection("storageModel").documents.first
+
+    assert_equal "value", stored.fetch("camel_case_field")
+    refute stored.key?("camelCaseField")
   end
 
   def test_mongodb_adapter_infers_schema_driven_one_to_one_joins_and_empty_join_values
@@ -725,5 +827,11 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def assert_bad_request(&block)
+    error = assert_raises(BetterAuth::APIError, &block)
+    assert_equal "BAD_REQUEST", error.status
+    error
   end
 end

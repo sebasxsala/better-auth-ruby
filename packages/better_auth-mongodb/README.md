@@ -94,12 +94,26 @@ auth = BetterAuth.auth(
 
 The same default applies to one-to-many join lookups when the join config does not set `limit:`. Passing an explicit `limit:` to `find_many` or to the join config overrides the default.
 
+Explicit `limit:` values must be positive integers. Explicit `offset:` values
+must be zero or positive integers. Invalid configured defaults, including
+non-positive `default_find_many_limit` values, fall back to the built-in cap of
+100 records.
+
 One-to-one joins ignore one-to-many limits. They are returned as a single object or `nil`.
 
-Ruby's adapters accept scalar values for `in` and `not_in` filters and coerce
-them to a one-element list. This is an intentional Ruby adapter-family behavior;
-upstream's TypeScript adapter factory is stricter before the Mongo adapter sees
-the query.
+Ruby's MongoDB adapter matches upstream's adapter factory by requiring array
+values for the `in` filter operator. The Ruby adapter still accepts scalar
+values for `not_in` and coerces them to a one-element list, matching the Ruby
+adapter-family behavior.
+
+Update calls intentionally strip logical `id` / Mongo `_id` from `$set` payloads
+so callers cannot mutate immutable Mongo identifiers. If an update contains no
+caller-supplied schema fields after id and unknown fields are ignored, the
+adapter raises `BAD_REQUEST` before calling MongoDB.
+
+Default storage field names use Ruby's snake_case convention. For example, an
+additional or plugin field named `camelCaseField` is stored as
+`camel_case_field` unless the schema config provides an explicit `fieldName`.
 
 ## Compatibility
 

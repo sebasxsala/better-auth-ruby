@@ -46,12 +46,12 @@ module BetterAuth
       def find_many(model:, where: [], sort_by: nil, limit: nil, offset: nil, select: nil, join: nil)
         model = model.to_s
         pipeline = [{"$match" => mongo_filter(model, where || [])}]
+        pipeline << {"$sort" => {sort_field(model, sort_by) => sort_direction(sort_by)}} if sort_by
+        pipeline << {"$skip" => non_negative_integer!(offset, "offset")} unless offset.nil?
+        effective_limit = limit.nil? ? default_find_many_limit : positive_integer!(limit, "limit")
+        pipeline << {"$limit" => effective_limit}
         pipeline.concat(join_stages(model, join)) if join
         pipeline << {"$project" => projection_for(model, select, join)} if select && !select.empty?
-        pipeline << {"$sort" => {sort_field(model, sort_by) => sort_direction(sort_by)}} if sort_by
-        pipeline << {"$skip" => offset.to_i} if offset
-        effective_limit = limit.nil? ? default_find_many_limit : limit.to_i
-        pipeline << {"$limit" => effective_limit} if effective_limit.positive?
 
         collection_for(model)
           .aggregate(pipeline, session_options)
@@ -61,9 +61,11 @@ module BetterAuth
 
       def update(model:, where:, update:)
         model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         data = transform_input(model, update, "update", true)
         document = to_document(model, data)
         document.delete("_id")
+        ensure_update_document!(document)
         result = collection_for(model).find_one_and_update(
           mongo_filter(model, where || []),
           {"$set" => document},
@@ -75,9 +77,11 @@ module BetterAuth
 
       def update_many(model:, where:, update:)
         model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         data = transform_input(model, update, "update", true)
         document = to_document(model, data)
         document.delete("_id")
+        ensure_update_document!(document)
         result = collection_for(model).update_many(
           mongo_filter(model, where || []),
           {"$set" => document},
@@ -180,7 +184,7 @@ module BetterAuth
       end
 
       def mongo_filter(model, where)
-        clauses = Array(where)
+        clauses = validate_where!(where)
         return {} if clauses.empty?
 
         conditions = clauses.map do |clause|
@@ -205,7 +209,8 @@ module BetterAuth
         value = options.advanced.dig(:database, :default_find_many_limit)
         return 100 if value.nil?
 
-        Integer(value)
+        parsed = Integer(value)
+        parsed.positive? ? parsed : 100
       rescue ArgumentError, TypeError
         100
       end
@@ -218,7 +223,10 @@ module BetterAuth
         operator = (fetch_key(clause, :operator) || "eq").to_s.downcase
         value = fetch_key(clause, :value)
 
-        field = resolve_field(model, fetch_key(clause, :field))
+        requested_field = fetch_key(clause, :field)
+        bad_request!("where field is required") if requested_field.nil? || requested_field.to_s.empty?
+
+        field = resolve_field(model, requested_field)
         attributes = fields_for(model).fetch(field)
         key = (field == "id") ? "_id" : storage_field(model, field)
         mode = (fetch_key(clause, :mode) || "sensitive").to_s
@@ -230,6 +238,8 @@ module BetterAuth
         when "eq"
           (insensitive && value.is_a?(String)) ? regex_condition(key, value, :eq, insensitive: true) : {key => store_value(field, value, attributes, strict_id: true)}
         when "in"
+          bad_request!("where value must be an array for in operator") unless value.is_a?(Array)
+
           (insensitive && value.is_a?(Array)) ? insensitive_in_condition(key, value) : {key => {"$in" => array_operator_values(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
         when "not_in"
           (insensitive && value.is_a?(Array)) ? insensitive_not_in_condition(key, value) : {key => {"$nin" => array_operator_values(value).map { |entry| store_value(field, entry, attributes, strict_id: true) }}}
@@ -281,9 +291,9 @@ module BetterAuth
           foreign_field = storage_field_for_join(join_model, config.fetch(:to))
           relation = config[:relation]
           limit = config.key?(:limit) ? config[:limit] : nil
-          effective_limit = limit.nil? ? default_find_many_limit : limit.to_i
+          effective_limit = limit.nil? ? default_find_many_limit : positive_integer!(limit, "join limit")
           unique = relation == "one-to-one" || config[:unique]
-          should_limit = !unique && effective_limit.positive?
+          should_limit = !unique
 
           lookup = if should_limit
             {
@@ -313,19 +323,30 @@ module BetterAuth
       end
 
       def normalized_join(model, join)
+        bad_request!("join must be a hash") unless join.is_a?(Hash)
+
         join.each_with_object({}) do |(join_model, config), result|
           join_model = join_model.to_s
+          bad_request!("join model is required") if join_model.empty?
+
           result[join_model] = normalize_join_config(model, join_model, config)
         end
       end
 
       def normalize_join_config(model, join_model, config)
+        bad_request!("join config must be true or a hash") unless config == true || config.is_a?(Hash)
+
         if config.is_a?(Hash) && (config.key?(:on) || config.key?("on"))
           on = config[:on] || config["on"]
+          bad_request!("join on must be a hash") unless on.is_a?(Hash)
+
           relation = config[:relation] || config["relation"]
           limit = config[:limit] || config["limit"]
           from = fetch_key(on, :from)
           to = fetch_key(on, :to)
+          bad_request!("join on.from is required") if from.nil? || from.to_s.empty?
+          bad_request!("join on.to is required") if to.nil? || to.to_s.empty?
+
           return {from: Schema.storage_key(from), to: Schema.storage_key(to), relation: relation, limit: limit, unique: unique_join_field?(join_model, to)}
         end
 
@@ -548,7 +569,7 @@ module BetterAuth
 
       def coerce_value(value, attributes)
         return value if value.nil?
-        return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
+        return parse_date_value(value) if attributes[:type] == "date" && value.is_a?(String)
 
         value
       end
@@ -609,6 +630,61 @@ module BetterAuth
           return hash[candidate] if hash.key?(candidate)
         end
         nil
+      end
+
+      def validate_where!(where)
+        bad_request!("where must be an array") unless where.is_a?(Array)
+
+        where.each do |clause|
+          bad_request!("where entries must be hashes") unless clause.is_a?(Hash)
+        end
+
+        where
+      end
+
+      def positive_integer!(value, name)
+        parsed = Integer(value)
+        bad_request!("#{name} must be a positive integer") unless parsed.positive?
+
+        parsed
+      rescue ArgumentError, TypeError
+        bad_request!("#{name} must be a positive integer")
+      end
+
+      def non_negative_integer!(value, name)
+        parsed = Integer(value)
+        bad_request!("#{name} must be zero or a positive integer") if parsed.negative?
+
+        parsed
+      rescue ArgumentError, TypeError
+        bad_request!("#{name} must be zero or a positive integer")
+      end
+
+      def ensure_update_document!(document)
+        bad_request!("No fields to update") if document.empty?
+      end
+
+      def ensure_update_input_has_fields!(model, update)
+        bad_request!("update must be a hash") unless update.is_a?(Hash)
+
+        fields = fields_for(model)
+        input = stringify_keys(update)
+        has_updatable_field = input.any? do |field_key, _value|
+          next false if field_key == "id" || field_key == "_id"
+
+          fields.key?(field_key) || fields.any? { |_field, attributes| attributes[:field_name].to_s == field_key }
+        end
+        bad_request!("No fields to update") unless has_updatable_field
+      end
+
+      def parse_date_value(value)
+        Time.parse(value)
+      rescue ArgumentError
+        bad_request!("Invalid date value")
+      end
+
+      def bad_request!(message)
+        raise APIError.new("BAD_REQUEST", message: message)
       end
 
       def schema_for(model)
