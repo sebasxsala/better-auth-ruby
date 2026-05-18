@@ -44,6 +44,10 @@ cannot be `/`, because that would capture every Sinatra route before the app can
 handle it. The core app still owns routes such as `/ok`, `/sign-up/email`,
 `/sign-in/email`, and plugin endpoints.
 
+Call `better_auth` once per Sinatra app class. Registering it more than once is
+treated as a configuration error because each Rack mount must delegate to one
+core Better Auth instance.
+
 `better_auth at:` sets the path prefix that Better Auth uses as its core
 `base_path`. The adapter supports two common Rack mount patterns:
 
@@ -58,7 +62,10 @@ When using reverse proxies, `Rack::URLMap`, or another parent app, make sure the
 `PATH_INFO` visible to Sinatra still aligns with the configured auth prefix.
 `SCRIPT_NAME` handling depends on the Rack server and mount stack, so verify
 redirect URLs and cookie paths in integration tests when mounting below a
-sub-path.
+sub-path. If the public auth URL includes a parent mount prefix, set
+`config.base_url` to that public URL, for example `https://app.example/api/auth`;
+core URL inference uses the configured Better Auth base path and cannot infer
+every parent Rack mount layout from Sinatra alone.
 
 ## Helpers
 
@@ -96,6 +103,18 @@ rake better_auth:routes
 
 `better_auth:install` creates `config/better_auth.rb`. SQL migrations are
 generated under `db/better_auth/migrate`.
+
+Migration and route tasks load Better Auth configuration from
+`config/better_auth.rb` by default. Set `BETTER_AUTH_CONFIG` (or the
+OpenAuth-compatible `OPEN_AUTH_CONFIG`) to a shared config file if your app keeps
+Better Auth setup elsewhere:
+
+```bash
+BETTER_AUTH_CONFIG=config/auth/better_auth.rb rake better_auth:generate:migration
+```
+
+The migration tasks fail when no config file is found, so generated SQL cannot
+silently omit app plugins or custom schema options.
 
 ## Database Notes
 

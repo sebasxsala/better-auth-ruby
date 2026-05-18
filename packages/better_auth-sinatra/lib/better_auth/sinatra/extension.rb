@@ -16,7 +16,7 @@ module BetterAuth
               "better_auth mount path cannot be '/' (it would capture every request). " \
               "Use a prefix such as #{BetterAuth::Configuration::DEFAULT_BASE_PATH.inspect}."
           end
-          warn "[better_auth-sinatra] better_auth is already configured for this app; the new configuration will be appended." if respond_to?(:better_auth_auth)
+          raise ArgumentError, "better_auth is already configured for this app" if respond_to?(:better_auth_auth)
 
           config = BetterAuth::Sinatra.configuration.copy
           yield config if block_given?

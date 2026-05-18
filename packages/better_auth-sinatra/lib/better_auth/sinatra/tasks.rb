@@ -22,7 +22,7 @@ namespace :better_auth do
   namespace :generate do
     desc "Create the Better Auth SQL migration"
     task :migration do
-      BetterAuth::Sinatra.load_app_config
+      BetterAuth::Sinatra.load_app_config!
       dialect = BetterAuth::Sinatra::Migration.normalize_dialect(BetterAuth::Env.get("BETTER_AUTH_DIALECT") || BetterAuth::Env.get("BETTER_AUTH_DATABASE_DIALECT") || "postgres")
       config = BetterAuth::Sinatra.migration_configuration
       path = BetterAuth::Sinatra::Migration.generate(config, dialect: dialect)
@@ -32,13 +32,13 @@ namespace :better_auth do
 
   desc "Run pending Better Auth SQL migrations"
   task :migrate do
-    BetterAuth::Sinatra.load_app_config
+    BetterAuth::Sinatra.load_app_config!
     BetterAuth::Sinatra::Migration.migrate(BetterAuth::Sinatra.auth)
   end
 
   desc "Print Better Auth Sinatra mount information"
   task :routes do
-    BetterAuth::Sinatra.load_app_config
+    BetterAuth::Sinatra.load_app_config!
     mount_path = BetterAuth::Sinatra.configuration.base_path
     puts "#{mount_path}/* -> BetterAuth.auth"
     puts "Core routes are handled by Better Auth; use the OpenAPI plugin or HTTP API docs for endpoint details."

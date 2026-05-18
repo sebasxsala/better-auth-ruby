@@ -237,7 +237,7 @@ module BetterAuth
       end
 
       def normalize_dialect(value)
-        case value.to_s.downcase
+        dialect = case value.to_s.downcase
         when "postgresql"
           :postgres
         when "sqlite3"
@@ -245,6 +245,9 @@ module BetterAuth
         else
           value.to_sym
         end
+        return dialect if [:postgres, :sqlite, :mysql, :mssql].include?(dialect)
+
+        raise UnsupportedAdapterError, "Unsupported SQL dialect for better_auth-sinatra migrations: #{dialect}"
       end
     end
   end

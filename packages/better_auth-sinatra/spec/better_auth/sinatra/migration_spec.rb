@@ -51,9 +51,51 @@ class BetterAuthSinatraFakeQueryConnection
   end
 end
 
+class BetterAuthSinatraFailingSQLAdapter < BetterAuth::Adapters::Base
+  attr_reader :connection, :dialect
+
+  def initialize(options)
+    super
+    @connection = self.class.connection
+    @dialect = :postgres
+  end
+
+  def self.connection
+    @connection ||= BetterAuthSinatraFailingSQLConnection.new
+  end
+
+  def self.reset!
+    @connection = BetterAuthSinatraFailingSQLConnection.new
+  end
+end
+
+class BetterAuthSinatraFailingSQLConnection
+  attr_reader :executed_statements, :applied_versions
+
+  def initialize
+    @executed_statements = []
+    @applied_versions = []
+  end
+
+  def exec(statement)
+    @executed_statements << statement
+    raise "broken migration statement" if statement.include?("BROKEN")
+
+    if statement.match?(/SELECT .*better_auth_schema_migrations/i)
+      applied_versions.map { |version| {"version" => version} }
+    elsif (match = statement.match(/VALUES \('([^']+)'\)/))
+      @applied_versions << match[1]
+      []
+    else
+      []
+    end
+  end
+end
+
 RSpec.describe BetterAuth::Sinatra::Migration do
   after do
     BetterAuth::Sinatra.reset!
+    BetterAuthSinatraFailingSQLAdapter.reset!
   end
 
   it "renders core SQL migrations including plugin schemas" do
@@ -198,11 +240,151 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     Rake.application = Rake::Application.new
   end
 
+  it "fails migration generation when no Sinatra config has been loaded" do
+    Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+
+        expect {
+          Rake::Task["better_auth:generate:migration"].invoke
+        }.to raise_error(ArgumentError, /Better Auth Sinatra config/)
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "loads an explicit config path when generating SQL migrations" do
+    with_env("BETTER_AUTH_CONFIG" => "config/custom_better_auth.rb", "OPEN_AUTH_CONFIG" => nil) do
+      Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+        in_directory(dir) do
+          load_tasks
+          FileUtils.mkdir_p("config")
+          File.write(
+            "config/custom_better_auth.rb",
+            <<~RUBY
+              BetterAuth::Sinatra.configure do |config|
+                config.secret = #{secret.inspect}
+                config.database = :memory
+                config.plugins = [
+                  BetterAuth::Plugin.new(
+                    id: "sinatra-config-plugin",
+                    schema: {
+                      apiKey: {
+                        model_name: "api_keys",
+                        fields: {
+                          id: {type: "string", required: true},
+                          userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
+                          key: {type: "string", required: true, unique: true}
+                        }
+                      }
+                    }
+                  )
+                ]
+              end
+            RUBY
+          )
+
+          Rake::Task["better_auth:generate:migration"].invoke
+
+          migration = Dir["db/better_auth/migrate/*_create_better_auth_tables.sql"].first
+          expect(File.read(migration)).to include('CREATE TABLE IF NOT EXISTS "api_keys"')
+        end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "raises unsupported adapter errors through the migrate Rake task" do
+    Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        FileUtils.mkdir_p("config")
+        File.write(
+          "config/better_auth.rb",
+          <<~RUBY
+            BetterAuth::Sinatra.configure do |config|
+              config.secret = #{secret.inspect}
+              config.database = :memory
+            end
+          RUBY
+        )
+
+        expect {
+          Rake::Task["better_auth:migrate"].invoke
+        }.to raise_error(BetterAuth::Sinatra::Migration::UnsupportedAdapterError, /SQL adapters/)
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "raises unsupported dialect errors through the migration generator task" do
+    with_env("BETTER_AUTH_DIALECT" => "nonsense", "BETTER_AUTH_CONFIG" => nil, "OPEN_AUTH_CONFIG" => nil) do
+      Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+        in_directory(dir) do
+          load_tasks
+          FileUtils.mkdir_p("config")
+          File.write(
+            "config/better_auth.rb",
+            <<~RUBY
+              BetterAuth::Sinatra.configure do |config|
+                config.secret = #{secret.inspect}
+                config.database = :memory
+              end
+            RUBY
+          )
+
+          expect {
+            Rake::Task["better_auth:generate:migration"].invoke
+          }.to raise_error(BetterAuth::Sinatra::Migration::UnsupportedAdapterError, /Unsupported SQL dialect/)
+        end
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "does not record a migration when a statement fails through the migrate task" do
+    Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        FileUtils.mkdir_p("config")
+        File.write(
+          "config/better_auth.rb",
+          <<~RUBY
+            BetterAuth::Sinatra.configure do |config|
+              config.secret = #{secret.inspect}
+              config.database = ->(options) { BetterAuthSinatraFailingSQLAdapter.new(options) }
+            end
+          RUBY
+        )
+        FileUtils.mkdir_p("db/better_auth/migrate")
+        File.write(
+          "db/better_auth/migrate/20260518000000_broken.sql",
+          "CREATE TABLE users (id text PRIMARY KEY);\nBROKEN STATEMENT;\n"
+        )
+
+        expect {
+          Rake::Task["better_auth:migrate"].invoke
+        }.to raise_error(RuntimeError, /broken migration statement/)
+
+        connection = BetterAuthSinatraFailingSQLAdapter.connection
+        expect(connection.executed_statements).to include("CREATE TABLE users (id text PRIMARY KEY)")
+        expect(connection.applied_versions).to eq([])
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
   it "uses BETTER_AUTH_DATABASE_DIALECT when generating migrations" do
     with_env("BETTER_AUTH_DIALECT" => nil, "BETTER_AUTH_DATABASE_DIALECT" => "sqlite") do
       Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
         in_directory(dir) do
           load_tasks
+          write_minimal_config
 
           Rake::Task["better_auth:generate:migration"].invoke
 
@@ -220,6 +402,7 @@ RSpec.describe BetterAuth::Sinatra::Migration do
       Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
         in_directory(dir) do
           load_tasks
+          write_minimal_config
 
           Rake::Task["better_auth:generate:migration"].invoke
 
@@ -237,6 +420,7 @@ RSpec.describe BetterAuth::Sinatra::Migration do
       Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
         in_directory(dir) do
           load_tasks
+          write_minimal_config
 
           Rake::Task["better_auth:generate:migration"].invoke
 
@@ -287,6 +471,19 @@ RSpec.describe BetterAuth::Sinatra::Migration do
   def load_tasks
     Rake.application = Rake::Application.new
     load File.expand_path("../../../lib/better_auth/sinatra/tasks.rb", __dir__)
+  end
+
+  def write_minimal_config(path = "config/better_auth.rb")
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(
+      path,
+      <<~RUBY
+        BetterAuth::Sinatra.configure do |config|
+          config.secret = #{secret.inspect}
+          config.database = :memory
+        end
+      RUBY
+    )
   end
 
   def with_env(values)

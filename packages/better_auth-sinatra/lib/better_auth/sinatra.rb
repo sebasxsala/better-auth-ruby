@@ -45,8 +45,25 @@ module BetterAuth
         BetterAuth::Configuration.new(options)
       end
 
-      def load_app_config(path = "config/better_auth.rb")
-        load path if File.exist?(path)
+      def app_config_path(path = nil)
+        path || BetterAuth::Env.get("BETTER_AUTH_CONFIG") || "config/better_auth.rb"
+      end
+
+      def load_app_config(path = nil)
+        config_path = app_config_path(path)
+        return false unless File.exist?(config_path)
+
+        load config_path
+        true
+      end
+
+      def load_app_config!(path = nil)
+        config_path = app_config_path(path)
+        return true if load_app_config(config_path)
+
+        raise ArgumentError,
+          "Better Auth Sinatra config not found at #{config_path.inspect}. " \
+          "Run `rake better_auth:install` or set BETTER_AUTH_CONFIG to a shared config file."
       end
 
       def default_config_template

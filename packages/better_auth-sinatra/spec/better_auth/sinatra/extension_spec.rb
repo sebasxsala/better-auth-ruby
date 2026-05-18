@@ -29,6 +29,24 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
   end
 
+  it "preserves trailing slashes so core handles default route parity" do
+    self.app = build_app
+
+    get "/api/auth/ok/"
+
+    expect(last_response.status).to eq(404)
+    expect(JSON.parse(last_response.body)).to eq("error" => "Not Found")
+  end
+
+  it "lets core skip trailing slashes when configured" do
+    self.app = build_app(overrides: {advanced: {skip_trailing_slashes: true}})
+
+    get "/api/auth/ok/"
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
   it "dispatches auth when SCRIPT_NAME and PATH_INFO split the mount prefix" do
     self.app = build_app(mount_path: "/api/auth")
 
@@ -36,6 +54,15 @@ RSpec.describe "BetterAuth::Sinatra extension" do
 
     expect(last_response.status).to eq(200)
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
+  it "preserves trailing slashes when SCRIPT_NAME and PATH_INFO split the mount prefix" do
+    self.app = build_app(mount_path: "/api/auth")
+
+    get "/ok/", {}, {"SCRIPT_NAME" => "/api/auth", "PATH_INFO" => "/ok/"}
+
+    expect(last_response.status).to eq(404)
+    expect(JSON.parse(last_response.body)).to eq("error" => "Not Found")
   end
 
   it "dispatches auth when the Sinatra app is nested under a parent Rack mount" do
@@ -101,6 +128,55 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(JSON.parse(last_response.body)).to eq("code" => "FORBIDDEN", "message" => "Missing or null Origin")
   end
 
+  it "keeps mounted origin checks active for callback URLs and fetch metadata" do
+    plugin = origin_probe_plugin
+    self.app = build_app(plugins: [plugin])
+
+    post "/api/auth/post", JSON.generate(callbackURL: "https://evil.example"), "CONTENT_TYPE" => "application/json"
+    expect(last_response.status).to eq(403)
+
+    post "/api/auth/post", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "https://evil.example",
+      "HTTP_COOKIE" => "better-auth.session_token=stale-token"
+    }
+    expect(last_response.status).to eq(403)
+
+    post "/api/auth/post", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "https://evil.example"
+    }
+    expect(last_response.status).to eq(403)
+
+    post "/api/auth/post", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "https://evil.example",
+      "HTTP_SEC_FETCH_SITE" => "cross-site",
+      "HTTP_SEC_FETCH_MODE" => "navigate",
+      "HTTP_SEC_FETCH_DEST" => "document"
+    }
+    expect(last_response.status).to eq(403)
+    expect(JSON.parse(last_response.body).fetch("message")).to eq("Invalid origin")
+  end
+
+  it "rejects null or malformed mounted origins when cookies are present" do
+    self.app = build_app(plugins: [origin_probe_plugin])
+
+    post "/api/auth/post", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "null",
+      "HTTP_COOKIE" => "better-auth.session_token=stale-token"
+    }
+    expect(last_response.status).to eq(403)
+
+    post "/api/auth/post", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "malicious.com",
+      "HTTP_COOKIE" => "better-auth.session_token=stale-token"
+    }
+    expect(last_response.status).to eq(403)
+  end
+
   it "lets Sinatra helpers resolve the current Better Auth user from real cookies" do
     self.app = build_app
     sign_up_email("ada@example.com")
@@ -147,6 +223,87 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     expect(JSON.parse(last_response.body).fetch("authenticated")).to eq(false)
     expect(last_response["set-cookie"]).to include("better-auth.session_token=")
     expect(last_response["set-cookie"].downcase).to include("max-age=0")
+  end
+
+  it "passes the original Rack request to helper session lookup hooks" do
+    captured = []
+    self.app = build_app(
+      hooks: {
+        before: lambda do |ctx|
+          next unless ctx.path == "/get-session"
+
+          captured << {
+            request_class: ctx.request&.class&.name,
+            method: ctx.method,
+            script_name: ctx.request&.script_name,
+            path_info: ctx.request&.path_info,
+            path: ctx.request&.path
+          }
+          nil
+        end
+      }
+    )
+    sign_up_email("ada@example.com")
+
+    get "/dashboard", {}, {
+      "SCRIPT_NAME" => "",
+      "PATH_INFO" => "/dashboard",
+      "HTTP_COOKIE" => cookie_header(last_response["set-cookie"])
+    }
+
+    expect(last_response.status).to eq(200)
+    expect(captured.last).to include(
+      request_class: "Rack::Request",
+      method: "GET",
+      script_name: "",
+      path_info: "/dashboard",
+      path: "/dashboard"
+    )
+  end
+
+  it "preserves app cookies when helper lookup appends Better Auth cookies" do
+    self.app = build_app
+    sign_up_email("ada@example.com")
+    original_cookie = cookie_header(last_response["set-cookie"])
+
+    post "/api/auth/sign-out", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://example.org",
+      "HTTP_COOKIE" => original_cookie
+    }
+    expect(last_response.status).to eq(200)
+
+    clear_cookies
+    get "/cookie-dashboard", {}, "HTTP_COOKIE" => original_cookie
+
+    expect(last_response.status).to eq(200)
+    cookies = last_response["set-cookie"].lines
+    expect(cookies.any? { |line| line.include?("app_cookie=1") }).to be(true)
+    expect(cookies.any? { |line| line.include?("better-auth.session_token=") && line.downcase.include?("max-age=0") }).to be(true)
+  end
+
+  it "raises Better Auth API errors from helper session lookup" do
+    self.app = build_app(
+      hooks: {
+        before: lambda do |ctx|
+          raise BetterAuth::APIError.new("INTERNAL_SERVER_ERROR", message: "session lookup failed") if ctx.path == "/get-session"
+        end
+      }
+    )
+
+    expect {
+      get "/dashboard"
+    }.to raise_error(BetterAuth::APIError, /session lookup failed/)
+  end
+
+  it "returns JSON from protected helpers for vendor JSON accept headers" do
+    self.app = build_app
+
+    get "/private", {}, "HTTP_ACCEPT" => "application/vnd.api+json"
+
+    expect(last_response.status).to eq(401)
+    expect(last_response["content-type"]).to include("application/json")
+    expect(JSON.parse(last_response.body)).to eq("code" => "UNAUTHORIZED", "message" => "Unauthorized")
   end
 
   it "does not reuse a helper session across requests without cookies" do
@@ -207,7 +364,7 @@ RSpec.describe "BetterAuth::Sinatra extension" do
     }.to raise_error(ArgumentError, /better_auth mount path cannot be/)
   end
 
-  it "warns when better_auth is configured twice on the same app class" do
+  it "raises when better_auth is configured twice on the same app class" do
     secret = "sinatra-secret-that-is-long-enough-for-validation"
 
     expect {
@@ -225,10 +382,10 @@ RSpec.describe "BetterAuth::Sinatra extension" do
           config.database = :memory
         end
       end
-    }.to output(/better_auth-sinatra.*already configured/).to_stderr
+    }.to raise_error(ArgumentError, /better_auth is already configured/)
   end
 
-  def build_app(mount_path: "/api/auth", plugins: [], overrides: {})
+  def build_app(mount_path: "/api/auth", plugins: [], hooks: nil, overrides: {})
     secret = "sinatra-secret-that-is-long-enough-for-validation"
 
     Class.new(Sinatra::Base) do
@@ -244,9 +401,16 @@ RSpec.describe "BetterAuth::Sinatra extension" do
         config.database = :memory
         config.email_and_password = {enabled: true}
         config.plugins = plugins
+        config.hooks = hooks if hooks
       end
 
       get "/dashboard" do
+        content_type :json
+        JSON.generate(authenticated: authenticated?, user: current_user)
+      end
+
+      get "/cookie-dashboard" do
+        response.set_cookie("app_cookie", value: "1", path: "/")
         content_type :json
         JSON.generate(authenticated: authenticated?, user: current_user)
       end
@@ -270,5 +434,14 @@ RSpec.describe "BetterAuth::Sinatra extension" do
 
   def cookie_header(set_cookie)
     set_cookie.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def origin_probe_plugin
+    BetterAuth::Plugin.new(
+      id: "sinatra-origin-probe",
+      endpoints: {
+        post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+      }
+    )
   end
 end

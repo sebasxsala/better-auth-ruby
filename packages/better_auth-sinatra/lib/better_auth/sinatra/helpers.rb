@@ -54,11 +54,34 @@ module BetterAuth
       def resolve_better_auth_session
         auth = better_auth_auth
         result = auth.api.get_session(
-          headers: better_auth_request_headers,
-          return_headers: true
+          request: Rack::Request.new(request.env),
+          method: "GET",
+          as_response: true
         )
+        return resolve_better_auth_response(result) if result.respond_to?(:headers) && result.respond_to?(:body)
+
         apply_better_auth_response_headers(result[:headers] || result["headers"] || {})
         result[:response] || result["response"]
+      end
+
+      def resolve_better_auth_response(response)
+        apply_better_auth_response_headers(response.headers || {})
+        body = response.body.respond_to?(:join) ? response.body.join : response.body.to_s
+        payload = body.empty? ? nil : JSON.parse(body)
+        raise_better_auth_response_error(response, payload) if response.status.to_i >= 400
+
+        payload
+      end
+
+      def raise_better_auth_response_error(response, payload)
+        payload = payload.is_a?(Hash) ? payload : {}
+        status = BetterAuth::APIError::STATUS_CODES.key(response.status.to_i) || "INTERNAL_SERVER_ERROR"
+        raise BetterAuth::APIError.new(
+          status,
+          message: payload["message"],
+          code: payload["code"],
+          headers: response.headers || {}
+        )
       end
 
       def better_auth_request_headers
