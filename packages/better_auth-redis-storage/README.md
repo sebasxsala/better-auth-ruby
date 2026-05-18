@@ -34,11 +34,13 @@ The canonical Ruby form is also supported:
 storage = BetterAuth::RedisStorage.new(client: redis)
 ```
 
-For upstream-shaped call sites, use `BetterAuth.redis_storage(client: redis)` or
-the camelCase class alias:
+For upstream-shaped call sites, use `BetterAuth.redisStorage(client: redis)` or
+the camelCase class alias. The upstream `keyPrefix:` keyword is accepted
+alongside the canonical Ruby `key_prefix:` keyword:
 
 ```ruby
-storage = BetterAuth::RedisStorage.redisStorage(client: redis)
+storage = BetterAuth.redisStorage(client: redis, keyPrefix: "my-app:")
+storage = BetterAuth::RedisStorage.redisStorage(client: redis, keyPrefix: "my-app:")
 ```
 
 ## Configuration
@@ -47,20 +49,25 @@ storage = BetterAuth::RedisStorage.redisStorage(client: redis)
 storage = BetterAuth::RedisStorage.new(
   client: redis,
   key_prefix: "better-auth:",
-  scan_count: nil,
+  scan_count: BetterAuth::RedisStorage::SCAN_DEFAULT_COUNT,
   atomic_clear: false
 )
 ```
 
-`client` must respond to `get`, `set`, `setex`, `del`, and `keys`. It should
-also respond to `scan` when `scan_count:` is configured, and to `incr` when
-`atomic_clear:` is enabled. This matches the interfaces exposed by the `redis`
-and `redis-namespace` gems.
+`client` must respond to `get`, `set`, `setex`, `del`, and `scan`. It should
+also respond to `keys` only when `scan_count: nil` is configured, and to `incr`
+when `atomic_clear:` is enabled. This matches the interfaces exposed by the
+`redis` and `redis-namespace` gems.
 
-`key_prefix` defaults to `"better-auth:"`. Passing `nil` falls back to the
-default. Any other value, including the empty string, is honored verbatim.
-Redis databases are not isolation boundaries for shared clients; applications
-sharing a Redis instance should use distinct prefixes.
+`key_prefix` defaults to `"better-auth:"`. `keyPrefix:` is accepted for
+upstream-shaped call sites. Passing `nil` falls back to the default. Any other
+value, including the empty string, is honored verbatim. Redis databases are not
+isolation boundaries for shared clients; applications sharing a Redis instance
+should use distinct prefixes.
+
+`list_keys` and `clear` escape Redis glob metacharacters in `key_prefix` before
+matching keys, so prefixes containing characters such as `*`, `?`, `[`, `]`, or
+`\` are treated as literal namespace bytes.
 
 > **Warning:** Passing `key_prefix: ""` puts Better Auth keys at the root of
 > the selected Redis logical namespace. `list_keys` and `clear` then match `*`,
@@ -68,12 +75,20 @@ sharing a Redis instance should use distinct prefixes.
 > key in that Redis database. Use an application-specific prefix unless the
 > Redis database is fully dedicated to Better Auth.
 
-`scan_count` is a Ruby-only opt-in for large Redis databases. By default the gem
-uses `KEYS "#{key_prefix}*"` to match upstream exactly. Set `scan_count:` to a
-positive count such as `100`, `500`, or `1000` to use `SCAN` instead:
+`scan_count` defaults to `BetterAuth::RedisStorage::SCAN_DEFAULT_COUNT` and uses
+Redis `SCAN` for `list_keys` and `clear`. Set `scan_count:` to a larger positive
+count such as `500` or `1000` to tune scan page size:
 
 ```ruby
 storage = BetterAuth::RedisStorage.new(client: redis, scan_count: 500)
+```
+
+For exact legacy upstream behavior, pass `scan_count: nil` to use blocking
+`KEYS "#{key_prefix}*"`. This is intended only for small or dedicated Redis
+databases because `KEYS` can block Redis while it walks the keyspace:
+
+```ruby
+storage = BetterAuth::RedisStorage.new(client: redis, scan_count: nil)
 ```
 
 `atomic_clear` is a Ruby-only opt-in for applications that need `clear` to be
@@ -108,7 +123,8 @@ storage.clear
 `listKeys` is available as a camelCase alias for upstream parity.
 
 `list_keys` returns every matching logical key but Redis does not guarantee key
-order for `KEYS` or `SCAN`. Sort the returned array in application code when a
+order for `KEYS` or `SCAN`. The SCAN path removes duplicate cursor results while
+preserving first-seen order. Sort the returned array in application code when a
 stable order matters.
 
 TTL handling for `set(key, value, ttl)`:
@@ -130,12 +146,13 @@ upstream calls `del(...keys)` even when `keys` is empty, while this Ruby gem
 skips `del` to avoid Redis `ERR wrong number of arguments for 'del'`.
 When keys do exist, `clear` deletes them in batches of
 `BetterAuth::RedisStorage::DELETE_CHUNK_SIZE` keys per `del` call to avoid very
-large Redis argument lists.
+large Redis argument lists. The SCAN path collects the matched key set before
+deleting it so cursor iteration is not affected by mutating the keyspace.
 
 With `atomic_clear: true`, `clear` increments a generation key with Redis
 `INCR`, making old generation keys immediately invisible to `get`, `set`,
 `delete`, `list_keys`, and Better Auth itself. Cleanup of the old generation is
-best-effort and uses `SCAN` when `scan_count:` is configured.
+best-effort and uses `SCAN` by default.
 
 Redis Cluster users should treat `list_keys` and `clear` as operationally
 constrained helpers. This adapter does not scan every cluster node, and

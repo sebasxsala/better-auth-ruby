@@ -44,6 +44,16 @@ class RedisStorageIntegrationTest < Minitest::Test
     assert_nil @storage.get("a")
   end
 
+  def test_real_redis_expires_direct_ttl_values
+    @storage.set("short", "one", 1)
+
+    assert_operator @client.ttl("#{@prefix_root}:short"), :>, 0
+
+    sleep 1.2
+
+    assert_nil @storage.get("short")
+  end
+
   def test_real_redis_stores_session_data_after_email_signup
     @client.set("#{@prefix_root}:outside", "outside")
     storage = isolated_storage("email-signup")
@@ -177,6 +187,20 @@ class RedisStorageIntegrationTest < Minitest::Test
     refute_nil key
     stored = JSON.parse(@storage.get(key))
     assert_equal 1, stored.fetch("count")
+    assert_operator @client.ttl("#{@prefix_root}:#{key}"), :>, 0
+  end
+
+  def test_real_redis_verification_values_get_ttl
+    auth = build_auth(@storage, store_session_in_database: false)
+
+    verification = auth.context.internal_adapter.create_verification_value(
+      identifier: "verify-ttl",
+      value: "secret",
+      expiresAt: Time.now + 60
+    )
+
+    assert_operator @client.ttl("#{@prefix_root}:verification:verify-ttl"), :>, 0
+    assert_operator @client.ttl("#{@prefix_root}:verification-id:#{verification.fetch("id")}"), :>, 0
   end
 
   def test_scan_count_round_trip_lists_keys
@@ -194,6 +218,30 @@ class RedisStorageIntegrationTest < Minitest::Test
     storage&.clear
   end
 
+  def test_real_redis_scan_count_lists_unique_many_keys_and_clear_removes_all
+    storage = BetterAuth::RedisStorage.new(
+      client: @client,
+      key_prefix: "#{@prefix_root}:many-scan:",
+      scan_count: 5
+    )
+    storage.clear
+    300.times { |i| storage.set("k#{i}", "v") }
+    @client.set("#{@prefix_root}:many-scan-outside", "outside")
+
+    keys = storage.list_keys
+
+    assert_equal 300, keys.length
+    assert_equal keys.uniq.sort, keys.sort
+
+    storage.clear
+
+    assert_empty storage.list_keys
+    assert_equal "outside", @client.get("#{@prefix_root}:many-scan-outside")
+  ensure
+    storage&.clear
+    @client&.del("#{@prefix_root}:many-scan-outside") if @client && @prefix_root
+  end
+
   def test_atomic_clear_logically_hides_previous_generation
     storage = BetterAuth::RedisStorage.new(
       client: @client,
@@ -203,15 +251,48 @@ class RedisStorageIntegrationTest < Minitest::Test
     )
     storage.clear
     storage.set("x", "1")
+    previous_generation = @client.get("#{@prefix_root}:atomic:__generation__")
 
     storage.clear
-    @client.set("#{@prefix_root}:atomic:v1:late", "stale")
+    @client.set("#{@prefix_root}:atomic:v#{previous_generation}:late", "stale")
 
     assert_nil storage.get("x")
     assert_nil storage.get("late")
+    assert_nil @client.get("#{@prefix_root}:atomic:v#{previous_generation}:x")
     assert_equal [], storage.list_keys
     storage.set("x", "2")
     assert_equal "2", storage.get("x")
+  ensure
+    storage&.clear
+  end
+
+  def test_real_redis_hashed_verification_identifier_does_not_expose_raw_identifier
+    storage = isolated_storage("hashed-verification")
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: "redis-storage-secret-with-enough-entropy-12345",
+      database: :memory,
+      secondary_storage: storage,
+      verification: {store_identifier: "hashed"}
+    )
+    raw_identifier = "sensitive-token@example.com"
+
+    verification = auth.context.internal_adapter.create_verification_value(
+      identifier: raw_identifier,
+      value: "secret",
+      expiresAt: Time.now + 120
+    )
+
+    keys = storage.list_keys
+    refute keys.any? { |key| key.include?(raw_identifier) }
+    assert_equal "secret", auth.context.internal_adapter.find_verification_value(raw_identifier).fetch("value")
+
+    auth.context.internal_adapter.update_verification_value(verification.fetch("id"), value: "updated")
+    assert_equal "updated", auth.context.internal_adapter.find_verification_value(raw_identifier).fetch("value")
+
+    auth.context.internal_adapter.delete_verification_value(verification.fetch("id"))
+    assert_nil auth.context.internal_adapter.find_verification_value(raw_identifier)
+    assert_empty storage.list_keys
   ensure
     storage&.clear
   end
