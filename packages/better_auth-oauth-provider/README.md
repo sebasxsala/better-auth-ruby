@@ -108,6 +108,7 @@ Common options accepted by `BetterAuth::Plugins.oauth_provider`:
 - `client_registration_allowed_scopes`
 - `client_credential_grant_default_scopes`
 - `store_client_secret`
+- `store_tokens`
 - `prefix`
 - `code_expires_in`
 - `id_token_expires_in`
@@ -131,6 +132,10 @@ Common options accepted by `BetterAuth::Plugins.oauth_provider`:
 - `disable_jwt_plugin`
 - `store`
 
+`store_client_secret` defaults to `"hashed"`. Set `store_client_secret: "plain"` only when migrating an existing app that still depends on plaintext client secrets. `store_tokens` defaults to `"hashed"` for opaque access tokens, refresh tokens, and authorization codes; custom hash callbacks may be supplied with `hash: ->(token, type) { ... }`.
+
+Token, introspection, and revocation client authentication is method-strict: `client_secret_basic` clients must authenticate with HTTP Basic credentials, `client_secret_post` clients must use body credentials, and public clients cannot authenticate to introspection or revocation. Authorization-code clients receive refresh tokens only when the granted scope includes `offline_access`.
+
 `rate_limit` accepts per-route overrides:
 
 ```ruby
@@ -150,6 +155,8 @@ Use `false` to disable a route-specific rule.
 
 `oauthAccessToken` now uses the upstream canonical columns `token`, `expiresAt`, `scopes`, `clientId`, `sessionId`, `userId`, `referenceId`, and `refreshId`. Legacy `access_token`, `refresh_token`, `access_token_expires_at`, and `scope` columns should be copied forward then dropped. `oauthConsent#consent_given` is also removed; a consent row means consent was granted.
 
+After enabling the hashed defaults, newly created OAuth client secrets and opaque tokens are stored hashed. Existing plaintext rows continue to require either a migration that re-registers/rotates secrets and tokens or a temporary explicit `store_client_secret: "plain"` setting for old clients during rollout.
+
 For non-Rails SQL apps, run the equivalent of:
 
 ```sql
@@ -166,7 +173,7 @@ Then drop the legacy access-token and consent columns. Rails apps using `better_
 
 ## Ruby Adaptations
 
-When the JWT plugin is registered, JWT access tokens and ID tokens use the JWT plugin's configured `jwks.key_pair_config.alg`, defaulting to `EdDSA` like upstream. If the JWT plugin is not registered, or `disable_jwt_plugin: true` is set, Ruby intentionally falls back to HS256 for compatibility.
+When the JWT plugin is registered, JWT access tokens and ID tokens use the JWT plugin's configured `jwks.key_pair_config.alg`, defaulting to `EdDSA` like upstream, and discovery metadata publishes the active JWKS URI. If the JWT plugin is not registered, or `disable_jwt_plugin: true` is set, Ruby intentionally falls back to HS256 for compatibility; with hashed client-secret storage, that fallback uses a server-derived per-client key.
 
 Upstream `oauthProviderResourceClient` and MCP protected-resource helpers remain future API-boundary work for Ruby. This gem currently hardens authorization-server behavior only.
 

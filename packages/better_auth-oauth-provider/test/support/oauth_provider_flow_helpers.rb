@@ -180,7 +180,8 @@ module OAuthProviderFlowHelpers
   end
 
   def decode_id_token(token, client)
-    JWT.decode(token, client[:client_secret], true, algorithm: "HS256").first
+    key = OpenSSL::HMAC.hexdigest("SHA256", SECRET, "oidc.id_token.#{client[:client_id]}")
+    JWT.decode(token, key, true, algorithm: "HS256").first
   end
 
   def rack_env(method, path, body: nil, headers: {})

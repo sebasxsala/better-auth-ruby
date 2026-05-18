@@ -58,6 +58,8 @@ module BetterAuth
             handler.call(request, jwt)
           rescue APIError => error
             handle_mcp_errors(error, resource, resource_metadata_mappings: resource_metadata_mappings)
+          rescue ::JWT::DecodeError
+            handle_mcp_errors(APIError.new("UNAUTHORIZED", message: "invalid token"), resource, resource_metadata_mappings: resource_metadata_mappings)
           end
         end
       end

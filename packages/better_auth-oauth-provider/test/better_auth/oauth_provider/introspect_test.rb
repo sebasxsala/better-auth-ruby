@@ -44,4 +44,34 @@ class OAuthProviderIntrospectTest < Minitest::Test
     assert_equal false, access[:active]
     assert_equal false, refresh[:active]
   end
+
+  def test_public_clients_cannot_authenticate_to_introspection
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    public_client = auth.api.admin_create_o_auth_client(
+      body: {
+        redirect_uris: ["com.example.app:/callback"],
+        token_endpoint_auth_method: "none",
+        type: "native",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        scope: "openid",
+        skip_consent: true
+      }
+    )
+    tokens = issue_authorization_code_tokens(
+      auth,
+      cookie,
+      public_client,
+      scope: "openid",
+      redirect_uri: "com.example.app:/callback"
+    )
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.o_auth2_introspect(body: {client_id: public_client[:client_id], token: tokens[:access_token], token_type_hint: "access_token"})
+    end
+
+    assert_equal 401, error.status_code
+    assert_match(/invalid_client/, error.message)
+  end
 end

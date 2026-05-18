@@ -242,6 +242,37 @@ class OAuthProviderTokenPkceTest < Minitest::Test
     assert tokens[:id_token]
   end
 
+  def test_public_client_cannot_opt_out_of_pkce
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = auth.api.admin_create_o_auth_client(
+      body: {
+        redirect_uris: ["com.example.app:/callback"],
+        token_endpoint_auth_method: "none",
+        type: "native",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        scope: "openid",
+        skip_consent: true,
+        require_pkce: false
+      }
+    )
+
+    status, headers, = authorize_response(
+      auth,
+      cookie,
+      client,
+      scope: "openid",
+      redirect_uri: "com.example.app:/callback",
+      verifier: nil
+    )
+
+    assert_equal 302, status
+    params = extract_redirect_params(headers)
+    assert_equal "invalid_request", params.fetch("error")
+    assert_match(/pkce/i, params.fetch("error_description"))
+  end
+
   def test_token_exchange_rejects_code_verifier_when_authorize_did_not_use_pkce
     auth = build_auth(scopes: ["openid"])
     cookie = sign_up_cookie(auth)

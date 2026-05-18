@@ -22,11 +22,10 @@ class OAuthProviderRevokeTest < Minitest::Test
     cookie = sign_up_cookie(auth)
     client = create_client(auth, cookie, scope: "openid", skip_consent: true)
     tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid")
-    token_value = BetterAuth::Plugins::OAuthProtocol.strip_prefix(tokens[:access_token], {}, :access_token)
 
     auth.api.o_auth2_revoke(body: revoke_body(client, tokens[:access_token], hint: "access_token"))
 
-    record = auth.context.adapter.find_one(model: "oauthAccessToken", where: [{field: "token", value: token_value}])
+    record = auth.context.adapter.find_many(model: "oauthAccessToken", where: [{field: "clientId", value: client[:client_id]}]).first
     assert record["revoked"]
   end
 
@@ -44,5 +43,19 @@ class OAuthProviderRevokeTest < Minitest::Test
     refresh = auth.api.o_auth2_introspect(body: introspect_body(owner, tokens[:refresh_token], hint: "refresh_token"))
     assert_equal true, access[:active]
     assert_equal true, refresh[:active]
+  end
+
+  def test_revoke_refresh_token_makes_associated_access_token_inactive
+    auth = build_auth(scopes: ["openid", "offline_access"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid offline_access", skip_consent: true)
+    tokens = issue_authorization_code_tokens(auth, cookie, client, scope: "openid offline_access")
+
+    assert_equal({revoked: true}, auth.api.o_auth2_revoke(body: revoke_body(client, tokens[:refresh_token], hint: "refresh_token")))
+
+    access = auth.api.o_auth2_introspect(body: introspect_body(client, tokens[:access_token], hint: "access_token"))
+    refresh = auth.api.o_auth2_introspect(body: introspect_body(client, tokens[:refresh_token], hint: "refresh_token"))
+    assert_equal false, access[:active]
+    assert_equal false, refresh[:active]
   end
 end

@@ -6,8 +6,9 @@ module BetterAuth
 
     def oauth_token_endpoint(config)
       Endpoint.new(path: "/oauth2/token", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
-        body = OAuthProtocol.stringify_keys(ctx.body)
+        body = OAuthProtocol.request_body!(ctx.body)
         client = OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix])
+        client_id = OAuthProtocol.stringify_keys(client)["clientId"]
         client_grants = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["grantTypes"])
         if client_grants.any? && !client_grants.include?(body["grant_type"].to_s)
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
@@ -17,19 +18,21 @@ module BetterAuth
           code = OAuthProtocol.consume_code!(
             config[:store],
             body["code"],
-            client_id: body["client_id"],
+            client_id: client_id,
             redirect_uri: body["redirect_uri"],
-            code_verifier: body["code_verifier"]
+            code_verifier: body["code_verifier"],
+            store_tokens: config[:store_tokens]
           )
+          session = oauth_active_authorization_session!(ctx, code[:session])
           audience = oauth_validate_resource!(ctx, config, body, code[:scopes])
           OAuthProtocol.issue_tokens(
             ctx,
             config[:store],
             model: "oauthAccessToken",
             client: client,
-            session: code[:session],
+            session: session,
             scopes: code[:scopes],
-            include_refresh: code[:scopes].include?("offline_access") || OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["grantTypes"]).include?(OAuthProtocol::REFRESH_GRANT),
+            include_refresh: code[:scopes].include?("offline_access"),
             issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)),
             prefix: config[:prefix],
             refresh_token_expires_in: config[:refresh_token_expires_in],
@@ -46,7 +49,8 @@ module BetterAuth
             nonce: code[:nonce],
             auth_time: code[:auth_time],
             reference_id: code[:reference_id],
-            filter_id_token_claims_by_scope: true
+            filter_id_token_claims_by_scope: true,
+            store_tokens: config[:store_tokens]
           )
         when OAuthProtocol::CLIENT_CREDENTIALS_GRANT
           requested = OAuthProtocol.parse_scopes(body["scope"])
@@ -66,17 +70,36 @@ module BetterAuth
           end
 
           audience = oauth_validate_resource!(ctx, config, body, requested)
-          OAuthProtocol.issue_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, session: {"user" => {}, "session" => {}}, scopes: requested, include_refresh: false, issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)), prefix: config[:prefix], audience: audience, grant_type: OAuthProtocol::CLIENT_CREDENTIALS_GRANT, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), use_jwt_plugin: !config[:disable_jwt_plugin], pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, requested, machine: true), id_token_expires_in: config[:id_token_expires_in], filter_id_token_claims_by_scope: true)
+          OAuthProtocol.issue_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, session: {"user" => {}, "session" => {}}, scopes: requested, include_refresh: false, issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)), prefix: config[:prefix], audience: audience, grant_type: OAuthProtocol::CLIENT_CREDENTIALS_GRANT, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), use_jwt_plugin: !config[:disable_jwt_plugin], pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, requested, machine: true), id_token_expires_in: config[:id_token_expires_in], filter_id_token_claims_by_scope: true, store_tokens: config[:store_tokens])
         when OAuthProtocol::REFRESH_GRANT
           refresh_record = OAuthProtocol.find_token_by_hint(config[:store], body["refresh_token"].to_s, "refresh_token", prefix: config[:prefix])
           refresh_scopes = OAuthProtocol.parse_scopes(body["scope"] || refresh_record&.fetch("scopes", nil))
           audience = oauth_validate_resource!(ctx, config, body, refresh_scopes)
-          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)), prefix: config[:prefix], refresh_token_expires_in: config[:refresh_token_expires_in], audience: audience, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), use_jwt_plugin: !config[:disable_jwt_plugin], pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, refresh_scopes, machine: false), id_token_expires_in: config[:id_token_expires_in], filter_id_token_claims_by_scope: true)
+          OAuthProtocol.refresh_tokens(ctx, config[:store], model: "oauthAccessToken", client: client, refresh_token: body["refresh_token"], scopes: body["scope"], issuer: OAuthProvider.validate_issuer_url(OAuthProtocol.issuer(ctx)), prefix: config[:prefix], refresh_token_expires_in: config[:refresh_token_expires_in], audience: audience, custom_token_response_fields: config[:custom_token_response_fields], custom_access_token_claims: config[:custom_access_token_claims], custom_id_token_claims: config[:custom_id_token_claims], jwt_access_token: oauth_jwt_access_token?(config, audience), use_jwt_plugin: !config[:disable_jwt_plugin], pairwise_secret: config[:pairwise_secret], access_token_expires_in: oauth_access_token_expires_in(config, refresh_scopes, machine: false), id_token_expires_in: config[:id_token_expires_in], filter_id_token_claims_by_scope: true, store_tokens: config[:store_tokens])
         else
           raise APIError.new("BAD_REQUEST", message: "unsupported_grant_type")
         end
-        ctx.json(response)
+        ctx.json(response, headers: oauth_no_store_headers)
       end
+    end
+
+    def oauth_no_store_headers
+      {"Cache-Control" => "no-store", "Pragma" => "no-cache"}
+    end
+
+    def oauth_active_authorization_session!(ctx, stored_session)
+      data = OAuthProtocol.stringify_keys(stored_session || {})
+      session_snapshot = OAuthProtocol.stringify_keys(data["session"] || data[:session] || {})
+      user_snapshot = OAuthProtocol.stringify_keys(data["user"] || data[:user] || {})
+      session_id = session_snapshot["id"]
+      stored = session_id && ctx.context.adapter.find_one(model: "session", where: [{field: "id", value: session_id}])
+      raise APIError.new("BAD_REQUEST", message: "session no longer exists") unless stored
+      raise APIError.new("BAD_REQUEST", message: "session no longer exists") if stored["expiresAt"] && stored["expiresAt"] <= Time.now
+
+      user = ctx.context.internal_adapter.find_user_by_id(stored["userId"] || user_snapshot["id"])
+      raise APIError.new("BAD_REQUEST", message: "missing user, user may have been deleted") unless user
+
+      {"user" => user, "session" => stored}
     end
 
     def oauth_validate_resource!(ctx, config, body, scopes)

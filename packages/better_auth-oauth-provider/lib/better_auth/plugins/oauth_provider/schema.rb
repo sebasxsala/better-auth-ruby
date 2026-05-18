@@ -16,7 +16,7 @@ module BetterAuth
             enableEndSession: {type: "boolean", required: false},
             clientSecretExpiresAt: {type: "number", required: false},
             scopes: {type: "string[]", required: false},
-            userId: {type: "string", required: false},
+            userId: {type: "string", required: false, index: true},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
             updatedAt: {type: "date", required: true, default_value: -> { Time.now }, on_update: -> { Time.now }},
             name: {type: "string", required: false},
@@ -37,17 +37,17 @@ module BetterAuth
             type: {type: "string", required: false},
             requirePKCE: {type: "boolean", required: false},
             subjectType: {type: "string", required: false},
-            referenceId: {type: "string", required: false},
+            referenceId: {type: "string", required: false, index: true},
             metadata: {type: "json", required: false}
           }
         },
         oauthRefreshToken: {
           fields: {
             token: {type: "string", required: true},
-            clientId: {type: "string", required: true},
+            clientId: {type: "string", required: true, index: true},
             sessionId: {type: "string", required: false},
-            userId: {type: "string", required: false},
-            referenceId: {type: "string", required: false},
+            userId: {type: "string", required: false, index: true},
+            referenceId: {type: "string", required: false, index: true},
             authTime: {type: "date", required: false},
             expiresAt: {type: "date", required: false},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
@@ -60,14 +60,14 @@ module BetterAuth
           fields: {
             token: {type: "string", unique: true, required: true},
             expiresAt: {type: "date", required: true},
-            clientId: {type: "string", required: true},
-            userId: {type: "string", required: false},
+            clientId: {type: "string", required: true, index: true},
+            userId: {type: "string", required: false, index: true},
             sessionId: {type: "string", required: false},
             scopes: {type: "string[]", required: true},
             revoked: {type: "date", required: false},
             referenceId: {type: "string", required: false},
             authTime: {type: "date", required: false},
-            refreshId: {type: "string", required: false},
+            refreshId: {type: "string", required: false, index: true},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
             updatedAt: {type: "date", required: true, default_value: -> { Time.now }, on_update: -> { Time.now }}
           }
@@ -75,9 +75,9 @@ module BetterAuth
         oauthConsent: {
           modelName: "oauthConsent",
           fields: {
-            clientId: {type: "string", required: true},
-            userId: {type: "string", required: false},
-            referenceId: {type: "string", required: false},
+            clientId: {type: "string", required: true, index: true},
+            userId: {type: "string", required: false, index: true},
+            referenceId: {type: "string", required: false, index: true},
             scopes: {type: "string[]", required: true},
             createdAt: {type: "date", required: true, default_value: -> { Time.now }},
             updatedAt: {type: "date", required: true, default_value: -> { Time.now }, on_update: -> { Time.now }}

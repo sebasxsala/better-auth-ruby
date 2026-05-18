@@ -34,7 +34,7 @@ class OAuthProviderPromptTest < Minitest::Test
     assert_match(%r{\A/signup\?}, headers.fetch("location"))
   end
 
-  def test_prompt_none_with_select_account_requirement_returns_account_selection_required
+  def test_prompt_none_cannot_be_combined_with_select_account
     auth = build_auth(scopes: ["openid"])
     cookie = sign_up_cookie(auth)
     client = create_client(auth, cookie, grant_types: ["authorization_code"], response_types: ["code"], scope: "openid")
@@ -43,7 +43,8 @@ class OAuthProviderPromptTest < Minitest::Test
     params = extract_redirect_params(headers)
 
     assert_equal 302, status
-    assert_equal "account_selection_required", params["error"]
+    assert_equal "invalid_request", params["error"]
+    assert_match(/prompt/, params["error_description"])
     assert_equal "http://localhost:3000", params["iss"]
   end
 

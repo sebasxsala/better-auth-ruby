@@ -110,6 +110,21 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     refute_includes fields, "scope"
   end
 
+  def test_oauth_hot_path_schema_fields_are_indexed
+    schema = BetterAuth::Schema.auth_tables(build_auth.options)
+
+    assert_equal true, schema.fetch("oauthClient")[:fields].fetch("userId")[:index]
+    assert_equal true, schema.fetch("oauthClient")[:fields].fetch("referenceId")[:index]
+    assert_equal true, schema.fetch("oauthConsent")[:fields].fetch("clientId")[:index]
+    assert_equal true, schema.fetch("oauthConsent")[:fields].fetch("userId")[:index]
+    assert_equal true, schema.fetch("oauthConsent")[:fields].fetch("referenceId")[:index]
+    assert_equal true, schema.fetch("oauthRefreshToken")[:fields].fetch("clientId")[:index]
+    assert_equal true, schema.fetch("oauthRefreshToken")[:fields].fetch("userId")[:index]
+    assert_equal true, schema.fetch("oauthAccessToken")[:fields].fetch("clientId")[:index]
+    assert_equal true, schema.fetch("oauthAccessToken")[:fields].fetch("userId")[:index]
+    assert_equal true, schema.fetch("oauthAccessToken")[:fields].fetch("refreshId")[:index]
+  end
+
   def test_consent_schema_drops_consent_given_column
     fields = BetterAuth::Schema.auth_tables(build_auth.options).fetch("oauthConsent")[:fields].keys
 
@@ -392,7 +407,7 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     )
     assert_equal "Bearer", tokens[:token_type]
     assert_equal "read", tokens[:scope]
-    assert tokens[:refresh_token]
+    assert_nil tokens[:refresh_token]
 
     consent_record = auth.context.adapter.find_one(model: "oauthConsent", where: [{field: "clientId", value: client[:client_id]}])
     assert_equal ["read"], consent_record.fetch("scopes")
@@ -1837,7 +1852,8 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
   end
 
   def decode_id_token(token, client)
-    JWT.decode(token, client[:client_secret], true, algorithm: "HS256").first
+    key = OpenSSL::HMAC.hexdigest("SHA256", SECRET, "oidc.id_token.#{client[:client_id]}")
+    JWT.decode(token, key, true, algorithm: "HS256").first
   end
 
   def introspect_body(client, token)

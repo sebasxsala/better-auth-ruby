@@ -24,7 +24,8 @@ module BetterAuth
           scopes_supported: config.dig(:advertised_metadata, :scopes_supported) || config[:scopes]
         }
         metadata[:registration_endpoint] = "#{base}/oauth2/register" if config[:allow_dynamic_client_registration]
-        metadata[:jwks_uri] = oauth_jwks_uri(config) if oauth_jwks_uri(config)
+        jwks_uri = oauth_jwks_uri(ctx, config)
+        metadata[:jwks_uri] = jwks_uri if jwks_uri
         ctx.json(metadata, headers: oauth_metadata_headers)
       end
     end
@@ -60,7 +61,8 @@ module BetterAuth
           claims_supported: config.dig(:advertised_metadata, :claims_supported) || config[:claims] || []
         }
         metadata[:registration_endpoint] = "#{base}/oauth2/register" if config[:allow_dynamic_client_registration]
-        metadata[:jwks_uri] = oauth_jwks_uri(config) if oauth_jwks_uri(config)
+        jwks_uri = oauth_jwks_uri(ctx, config)
+        metadata[:jwks_uri] = jwks_uri if jwks_uri
         ctx.json(metadata, headers: oauth_metadata_headers)
       end
     end
@@ -69,10 +71,21 @@ module BetterAuth
       {"Cache-Control" => "public, max-age=15, stale-while-revalidate=15, stale-if-error=86400"}
     end
 
-    def oauth_jwks_uri(config)
+    def oauth_jwks_uri(ctx, config)
       config.dig(:advertised_metadata, :jwks_uri) ||
         config[:jwks_uri] ||
-        config.dig(:jwks, :remote_url)
+        config.dig(:jwks, :remote_url) ||
+        oauth_default_jwks_uri(ctx, config)
+    end
+
+    def oauth_default_jwks_uri(ctx, config)
+      return nil if config[:disable_jwt_plugin]
+
+      jwt_plugin = ctx.context.options.plugins.find { |plugin| plugin.id == "jwt" }
+      return nil unless jwt_plugin
+
+      path = jwt_plugin.options&.dig(:jwks, :jwks_path) || "/jwks"
+      "#{OAuthProtocol.endpoint_base(ctx)}#{path}"
     end
 
     def oauth_token_auth_methods(config)

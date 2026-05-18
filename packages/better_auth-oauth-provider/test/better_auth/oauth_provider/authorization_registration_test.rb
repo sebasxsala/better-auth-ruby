@@ -125,6 +125,61 @@ class OAuthProviderAuthorizationRegistrationTest < Minitest::Test
     refute signed.key?("prompt")
   end
 
+  def test_request_uri_resolution_keeps_front_channel_client_id
+    auth = build_auth(
+      scopes: ["openid"],
+      request_uri_resolver: ->(_input) {
+        {
+          response_type: "code",
+          client_id: "attacker-client",
+          redirect_uri: "https://resource.example/callback",
+          scope: "openid",
+          code_challenge: pkce_challenge,
+          code_challenge_method: "S256"
+        }
+      }
+    )
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    status, headers, = auth.api.o_auth2_authorize(
+      query: {
+        client_id: client[:client_id],
+        request_uri: "urn:ietf:params:oauth:request_uri:front-client"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, status
+    signed = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    assert_equal client[:client_id], signed.fetch("client_id")
+  end
+
+  def test_prompt_none_cannot_be_combined_with_interactive_prompts
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    status, headers, = auth.api.o_auth2_authorize(
+      headers: {"cookie" => cookie},
+      query: {
+        response_type: "code",
+        client_id: client[:client_id],
+        redirect_uri: "https://resource.example/callback",
+        scope: "openid",
+        prompt: "none login",
+        code_challenge: pkce_challenge,
+        code_challenge_method: "S256"
+      },
+      as_response: true
+    )
+
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    assert_equal "invalid_request", params.fetch("error")
+    assert_match(/prompt/, params.fetch("error_description"))
+  end
+
   def test_request_uri_without_resolver_redirects_invalid_request_uri
     auth = build_auth(scopes: ["openid"])
     cookie = sign_up_cookie(auth)

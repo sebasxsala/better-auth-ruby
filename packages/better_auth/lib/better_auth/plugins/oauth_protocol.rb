@@ -29,6 +29,12 @@ module BetterAuth
         parse_scopes(value).join(" ")
       end
 
+      def request_body!(value)
+        return stringify_keys(value || {}) if value.nil? || value.is_a?(Hash)
+
+        raise APIError.new("BAD_REQUEST", message: "request body must be an object")
+      end
+
       def issuer(ctx)
         ctx.context.options.base_url.to_s.empty? ? origin_for(ctx.context.base_url) : ctx.context.options.base_url
       end
@@ -100,7 +106,7 @@ module BetterAuth
       end
 
       def create_client(ctx, model:, body:, owner_session: nil, default_auth_method: "client_secret_basic", store_client_secret: "plain", unauthenticated: false, default_scopes: nil, allowed_scopes: nil, prefix: {}, dynamic_registration: false, admin: false, pairwise_secret: nil, strip_client_metadata: false, reference_id: nil)
-        body = stringify_keys(body || {})
+        body = request_body!(body || {})
         requested_auth_method = body["token_endpoint_auth_method"] || default_auth_method
         validate_client_metadata_enums!(requested_auth_method, body)
         validate_admin_only_fields!(body, admin: admin)
@@ -116,6 +122,7 @@ module BetterAuth
         grant_types = Array(body["grant_types"] || [AUTH_CODE_GRANT]).map(&:to_s)
         response_types = Array(body["response_types"] || ["code"]).map(&:to_s)
         validate_client_registration!(auth_method, grant_types, response_types, body, unauthenticated: unauthenticated, dynamic_registration: dynamic_registration)
+        validate_redirect_scheme_for_client!(auth_method, body, redirects)
         validate_pairwise_client!(body, redirects, pairwise_secret)
 
         scopes = parse_scopes(body["scope"] || body["scopes"])
@@ -237,6 +244,20 @@ module BetterAuth
         end
       end
 
+      def validate_redirect_scheme_for_client!(auth_method, body, redirects)
+        return if auth_method == "none" && body["type"] != "web"
+
+        redirects.each do |value|
+          uri = URI.parse(value.to_s)
+          next if uri.scheme == "https"
+          next if uri.scheme == "http" && loopback_host?(uri.hostname || uri.host)
+
+          raise APIError.new("BAD_REQUEST", message: "redirect_uris is invalid")
+        end
+      rescue URI::InvalidURIError
+        raise APIError.new("BAD_REQUEST", message: "redirect_uris is invalid")
+      end
+
       def validate_pairwise_client!(body, redirects, pairwise_secret)
         subject_type = body["subject_type"] || body["subjectType"]
         return unless subject_type == "pairwise"
@@ -266,7 +287,11 @@ module BetterAuth
       end
 
       def client_metadata(body, strip_unknown: false)
-        metadata = stringify_keys(body["metadata"] || {})
+        raw_metadata = body["metadata"]
+        unless raw_metadata.nil? || raw_metadata.is_a?(Hash)
+          raise APIError.new("BAD_REQUEST", message: "metadata must be an object")
+        end
+        metadata = stringify_keys(raw_metadata || {})
         metadata = metadata.slice("software_id", "software_version", "software_statement", "tos_uri", "policy_uri") if strip_unknown
         metadata["software_id"] = body["software_id"] if body["software_id"]
         metadata["software_version"] = body["software_version"] if body["software_version"]
@@ -313,15 +338,23 @@ module BetterAuth
         ctx.context.adapter.find_one(model: model, where: [{field: "clientId", value: client_id.to_s}])
       end
 
-      def authenticate_client!(ctx, model, store_client_secret: "plain", prefix: {})
-        body = stringify_keys(ctx.body || {})
+      def authenticate_client!(ctx, model, store_client_secret: "plain", prefix: {}, require_confidential: false)
+        body = request_body!(ctx.body || {})
         client_id = body["client_id"]
         client_secret = strip_prefix(body["client_secret"], prefix, :client_secret) || body["client_secret"]
 
         authorization = ctx.headers["authorization"]
-        if authorization.to_s.start_with?("Basic ") && client_id.to_s.empty?
-          decoded = Base64.decode64(authorization.delete_prefix("Basic "))
+        auth_method_used = client_secret.to_s.empty? ? nil : "client_secret_post"
+        if authorization.to_s.start_with?("Basic ")
+          decoded = Base64.strict_decode64(authorization.delete_prefix("Basic "))
+          unless decoded.include?(":")
+            raise APIError.new("BAD_REQUEST", message: "invalid authorization header format", body: {error: "invalid_client", error_description: "invalid authorization header format"})
+          end
           client_id, client_secret = decoded.split(":", 2)
+          if client_id.to_s.empty? || client_secret.to_s.empty?
+            raise APIError.new("BAD_REQUEST", message: "invalid authorization header format", body: {error: "invalid_client", error_description: "invalid authorization header format"})
+          end
+          auth_method_used = "client_secret_basic"
         end
 
         client = find_client(ctx, model, client_id)
@@ -332,20 +365,34 @@ module BetterAuth
 
         method = client_data["tokenEndpointAuthMethod"] || "client_secret_basic"
         if method == "none"
+          raise APIError.new("UNAUTHORIZED", message: "invalid_client") if require_confidential
           raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless client_secret.to_s.empty?
           return client
+        end
+        expected_method = (method == "client_secret_post") ? "client_secret_post" : "client_secret_basic"
+        raise APIError.new("UNAUTHORIZED", message: "invalid_client") unless auth_method_used == expected_method
+        if client_secret_expired?(client_data["clientSecretExpiresAt"])
+          raise APIError.new("UNAUTHORIZED", message: "invalid_client")
         end
         if method != "none" && !verify_client_secret(ctx, stringify_keys(client)["clientSecret"], client_secret, store_client_secret)
           raise APIError.new("UNAUTHORIZED", message: "invalid_client")
         end
 
-        client
+        client.merge("__providedClientSecret" => client_secret)
       rescue ArgumentError
-        raise APIError.new("UNAUTHORIZED", message: "invalid_client")
+        raise APIError.new("BAD_REQUEST", message: "invalid authorization header format", body: {error: "invalid_client", error_description: "invalid authorization header format"})
       end
 
-      def store_code(store, code:, client_id:, redirect_uri:, session:, scopes:, code_challenge: nil, code_challenge_method: nil, nonce: nil, reference_id: nil, auth_time: nil, expires_in: 600)
-        store[:codes][code] = {
+      def client_secret_expired?(value)
+        return false if value.nil? || value.to_i == 0
+
+        seconds = timestamp_seconds(value)
+        seconds && seconds <= Time.now.to_i
+      end
+
+      def store_code(store, code:, client_id:, redirect_uri:, session:, scopes:, code_challenge: nil, code_challenge_method: nil, nonce: nil, reference_id: nil, auth_time: nil, expires_in: 600, store_tokens: "hashed")
+        stored_code = get_stored_token(store_tokens, code, "authorization_code")
+        store[:codes][stored_code] = {
           client_id: client_id,
           redirect_uri: redirect_uri,
           session: session,
@@ -359,8 +406,9 @@ module BetterAuth
         }
       end
 
-      def consume_code!(store, code, client_id:, redirect_uri:, code_verifier: nil)
-        data = store[:codes].delete(code.to_s)
+      def consume_code!(store, code, client_id:, redirect_uri:, code_verifier: nil, store_tokens: "hashed")
+        stored_code = get_stored_token(store_tokens, code.to_s, "authorization_code")
+        data = store[:codes].delete(stored_code) || store[:codes].delete(code.to_s)
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") if data[:expires_at] <= Time.now
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data[:client_id] == client_id.to_s
@@ -396,6 +444,7 @@ module BetterAuth
 
       def pkce_required?(client, scopes)
         data = stringify_keys(client)
+        return true if data["public"] || data["tokenEndpointAuthMethod"] == "none" || ["native", "user-agent-based"].include?(data["type"])
         return true if parse_scopes(scopes).include?("offline_access")
         require_pkce = client_require_pkce(data)
         return require_pkce unless require_pkce.nil?
@@ -403,7 +452,7 @@ module BetterAuth
         true
       end
 
-      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil, filter_id_token_claims_by_scope: false)
+      def issue_tokens(ctx, store, model:, client:, session:, scopes:, include_refresh: false, issuer: nil, jwt_audience: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, grant_type: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, nonce: nil, auth_time: nil, reference_id: nil, filter_id_token_claims_by_scope: false, store_tokens: "hashed")
         data = stringify_keys(session || {})
         user = stringify_keys(data["user"] || data[:user] || {})
         session_data = stringify_keys(data["session"] || data[:session] || {})
@@ -424,7 +473,7 @@ module BetterAuth
         refresh_record = nil
         if refresh_token_value
           refresh_record = {
-            "token" => refresh_token_value,
+            "token" => store_token_value(store_tokens, refresh_token_value, "refresh_token"),
             "clientId" => client_data["clientId"],
             "sessionId" => session_data["id"],
             "userId" => user["id"],
@@ -440,13 +489,13 @@ module BetterAuth
             "issuedAt" => Time.now
           }
           created_refresh = schema_model?(ctx, "oauthRefreshToken") ? ctx.context.adapter.create(model: "oauthRefreshToken", data: refresh_record) : nil
-          refresh_record = refresh_record.merge("id" => stringify_keys(created_refresh || {})["id"], "user" => user, "session" => session_data, "client" => client_data, "scope" => scope)
+          refresh_record = refresh_record.merge("id" => stringify_keys(created_refresh || {})["id"], "token" => refresh_token_value, "user" => user, "session" => session_data, "client" => client_data, "scope" => scope)
           store[:refresh_tokens][refresh_token_value] = refresh_record
           store[:refresh_tokens][refresh_token] = refresh_record
         end
         unless jwt_access_token && audience
           record = {
-            "token" => access_token_value,
+            "token" => store_token_value(store_tokens, access_token_value, "access_token"),
             "expiresAt" => expires_at,
             "clientId" => client_data["clientId"],
             "userId" => user["id"],
@@ -464,7 +513,7 @@ module BetterAuth
           created_access = ctx.context.adapter.create(model: model, data: record)
           created = stringify_keys(created_access || {})
           record = record.merge("id" => created["id"]) if created["id"]
-          stored_record = record.merge("user" => user, "session" => session_data, "client" => client_data)
+          stored_record = record.merge("token" => access_token_value, "user" => user, "session" => session_data, "client" => client_data)
           store[:tokens][access_token_value] = stored_record
           store[:tokens][access_token] = stored_record
         end
@@ -478,7 +527,8 @@ module BetterAuth
         }
         response[:audience] = audience if audience
         response[:refresh_token] = refresh_token if refresh_token
-        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time, custom_claims: custom_id_token_claims, scopes: parse_scopes(scope), client: client_data, filter_claims_by_scope: filter_id_token_claims_by_scope, expires_in: id_token_expires_in, use_jwt_plugin: use_jwt_plugin) if parse_scopes(scope).include?("openid")
+        id_token_client_data = client_data.merge("clientSecret" => client_data["__providedClientSecret"] || client_data["clientSecret"])
+        response[:id_token] = id_token(user.merge("id" => subject), client_data["clientId"], issuer || issuer(ctx), jwt_audience || client_data["clientId"], ctx: ctx, signer: id_token_signer, session_id: session_data["id"], include_sid: !!client_data["enableEndSession"], nonce: nonce, auth_time: token_auth_time, custom_claims: custom_id_token_claims, scopes: parse_scopes(scope), client: id_token_client_data, filter_claims_by_scope: filter_id_token_claims_by_scope, expires_in: id_token_expires_in, use_jwt_plugin: use_jwt_plugin) if parse_scopes(scope).include?("openid")
         if custom_token_response_fields.respond_to?(:call)
           extra = custom_token_response_fields.call({grant_type: grant_type, user: user.empty? ? nil : user, scopes: parse_scopes(scope), metadata: stringify_keys(client_data["metadata"] || {})})
           response.merge!(stringify_keys(extra).reject { |key, _value| standard_token_response_field?(key) }.transform_keys(&:to_sym)) if extra.is_a?(Hash)
@@ -486,7 +536,7 @@ module BetterAuth
         response
       end
 
-      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, filter_id_token_claims_by_scope: false)
+      def refresh_tokens(ctx, store, model:, client:, refresh_token:, scopes: nil, issuer: nil, access_token_expires_in: 3600, refresh_token_expires_in: 2_592_000, id_token_expires_in: 3600, id_token_signer: nil, prefix: {}, audience: nil, custom_token_response_fields: nil, custom_access_token_claims: nil, custom_id_token_claims: nil, jwt_access_token: false, use_jwt_plugin: false, pairwise_secret: nil, filter_id_token_claims_by_scope: false, store_tokens: "hashed")
         refresh_token_value = strip_prefix(refresh_token, prefix, :refresh_token)
         data = refresh_token_value ? store[:refresh_tokens][refresh_token_value] : nil
         raise APIError.new("BAD_REQUEST", message: "invalid_grant") unless data
@@ -532,7 +582,8 @@ module BetterAuth
           id_token_expires_in: id_token_expires_in,
           auth_time: data["authTime"],
           reference_id: data["referenceId"],
-          filter_id_token_claims_by_scope: filter_id_token_claims_by_scope
+          filter_id_token_claims_by_scope: filter_id_token_claims_by_scope,
+          store_tokens: store_tokens
         )
       end
 
@@ -757,6 +808,11 @@ module BetterAuth
       end
 
       def id_token_hs256_key(ctx, client_id, client_secret = nil)
+        oauth_provider = ctx&.context&.options&.plugins&.find { |plugin| plugin.id == "oauth-provider" }
+        if oauth_provider&.options&.fetch(:store_client_secret, nil).to_s == "hashed"
+          label = client_id.to_s.empty? ? "better-auth" : client_id.to_s
+          return OpenSSL::HMAC.hexdigest("SHA256", ctx.context.secret.to_s, "oidc.id_token.#{label}")
+        end
         return client_secret.to_s unless client_secret.to_s.empty?
 
         label = client_id.to_s.empty? ? "better-auth" : client_id.to_s
@@ -857,10 +913,29 @@ module BetterAuth
         secret
       end
 
+      def store_token_value(storage_method, token, type)
+        case storage_method
+        when "hashed", :hashed
+          Crypto.sha256(token.to_s, encoding: :base64url)
+        else
+          mode = normalize_secret_storage_mode(storage_method)
+          return mode[:hash].call(token.to_s, type) if mode.is_a?(Hash) && mode[:hash].respond_to?(:call)
+
+          raise Error, "storeToken: unsupported storageMethod type '#{storage_method}'"
+        end
+      end
+
+      def get_stored_token(storage_method, token, type)
+        store_token_value(storage_method, token, type)
+      end
+
       def verify_client_secret(ctx, stored_secret, provided_secret, mode)
         mode = normalize_secret_storage_mode(mode)
         return Crypto.constant_time_compare(Crypto.sha256(provided_secret, encoding: :base64url), stored_secret.to_s) if mode == "hashed"
-        return Crypto.constant_time_compare(Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_secret).to_s, provided_secret.to_s) if mode == "encrypted"
+        if mode == "encrypted"
+          decrypted = Crypto.symmetric_decrypt(key: ctx.context.secret_config, data: stored_secret)
+          return Crypto.constant_time_compare(decrypted.to_s, provided_secret.to_s)
+        end
 
         if mode.is_a?(Hash)
           return Crypto.constant_time_compare(mode[:hash].call(provided_secret).to_s, stored_secret.to_s) if mode[:hash].respond_to?(:call)
@@ -868,6 +943,8 @@ module BetterAuth
         end
 
         Crypto.constant_time_compare(stored_secret.to_s, provided_secret.to_s)
+      rescue Error, ArgumentError
+        false
       end
 
       def normalize_secret_storage_mode(mode)

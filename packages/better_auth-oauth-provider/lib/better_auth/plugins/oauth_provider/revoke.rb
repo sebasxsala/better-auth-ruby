@@ -6,7 +6,7 @@ module BetterAuth
 
     def oauth_revoke_endpoint(config)
       Endpoint.new(path: "/oauth2/revoke", method: "POST", metadata: {allowed_media_types: ["application/x-www-form-urlencoded", "application/json"]}) do |ctx|
-        client = OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix])
+        client = OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix], require_confidential: true)
         client_id = OAuthProtocol.stringify_keys(client)["clientId"]
         body = OAuthProtocol.stringify_keys(ctx.body)
         if body["token_type_hint"].to_s == "access_token" && OAuthProtocol.find_token_by_hint(config[:store], body["token"].to_s, "refresh_token", prefix: config[:prefix])
@@ -39,7 +39,20 @@ module BetterAuth
 
       if is_refresh && OAuthProtocol.schema_model?(ctx, "oauthRefreshToken")
         ctx.context.adapter.update(model: "oauthRefreshToken", where: [{field: "id", value: token["id"]}], update: {revoked: token["revoked"]})
+        oauth_revoke_refresh_access_tokens(ctx, config[:store], token)
       end
+    end
+
+    def oauth_revoke_refresh_access_tokens(ctx, store, refresh_token)
+      refresh_id = refresh_token["id"]
+      return if refresh_id.to_s.empty?
+
+      store[:tokens].each_value do |record|
+        record["revoked"] = refresh_token["revoked"] if record["refreshId"].to_s == refresh_id.to_s
+      end
+      return unless OAuthProtocol.schema_model?(ctx, "oauthAccessToken")
+
+      ctx.context.adapter.update_many(model: "oauthAccessToken", where: [{field: "refreshId", value: refresh_id}], update: {revoked: refresh_token["revoked"]})
     end
   end
 end

@@ -39,4 +39,22 @@ class OAuthProviderMetadataTest < Minitest::Test
     assert_equal 200, response.status
     refute body.key?(:registration_endpoint)
   end
+
+  def test_metadata_includes_default_jwks_uri_when_jwt_plugin_is_active
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: OAuthProviderFlowHelpers::SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.jwt(jwks: {key_pair_config: {alg: "EdDSA"}}),
+        BetterAuth::Plugins.oauth_provider(scopes: ["openid"])
+      ]
+    )
+
+    metadata = auth.api.get_open_id_config
+
+    assert_equal "http://localhost:3000/api/auth/jwks", metadata[:jwks_uri]
+    assert_equal ["EdDSA"], metadata[:id_token_signing_alg_values_supported]
+  end
 end

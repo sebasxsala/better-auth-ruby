@@ -40,6 +40,9 @@ module BetterAuth
       scopes = OAuthProtocol.parse_scopes(query["scope"])
       scopes = OAuthProtocol.parse_scopes(OAuthProtocol.stringify_keys(client)["scopes"] || config[:scopes]) if scopes.empty?
       prompts = OAuthProtocol.parse_scopes(query["prompt"])
+      if prompts.include?("none") && (prompts - ["none"]).any?
+        raise ctx.redirect(oauth_authorize_error_redirect(ctx, query, "invalid_request", "prompt none cannot be combined with other prompts"))
+      end
       client_data = OAuthProtocol.stringify_keys(client)
       if client_data["disabled"]
         raise ctx.redirect(oauth_authorize_error_redirect(ctx, query, "invalid_client", "client is disabled"))
@@ -204,7 +207,9 @@ module BetterAuth
       resolved = resolver.call({request_uri: query["request_uri"], client_id: query["client_id"], context: ctx})
       return oauth_invalid_request_uri!(ctx, query, "request_uri is invalid or expired") unless resolved
 
-      OAuthProtocol.stringify_keys(resolved)
+      resolved_query = OAuthProtocol.stringify_keys(resolved)
+      resolved_query["client_id"] = query["client_id"] if query["client_id"]
+      resolved_query
     end
 
     def oauth_invalid_request_uri!(ctx, query, description)
