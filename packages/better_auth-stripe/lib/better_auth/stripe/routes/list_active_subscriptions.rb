@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/list", method: "GET") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/list", method: "GET", metadata: {openapi: {operationId: "listActiveSubscriptions"}}) do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             query = BetterAuth::Plugins.normalize_hash(ctx.query)
             customer_type = BetterAuth::Plugins.stripe_customer_type!(query)

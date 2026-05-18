@@ -51,3 +51,5 @@ Configure plans under `subscription: { enabled: true, plans: [...] }`. Ruby acce
 For organization subscriptions, `seat_price_id` enables upstream-style seat billing. Checkout sends the base plan item with quantity `1` and a separate seat item whose quantity is the current organization member count. Webhooks read the seat item quantity back into the local `subscription.seats` field.
 
 `scheduleAtPeriodEnd` / `schedule_at_period_end` on `/subscription/upgrade` creates a Stripe subscription schedule for active subscriptions, stores `stripeScheduleId`, and returns the configured `returnUrl` instead of opening the billing portal immediately.
+
+Ruby also routes subscription-cancel billing portal returns through `/subscription/cancel/callback` so a missed webhook can still sync the local cancellation fields before redirecting to the configured callback URL.

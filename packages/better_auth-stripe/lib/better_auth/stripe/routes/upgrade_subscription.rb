@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/upgrade", method: "POST") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/upgrade", method: "POST", metadata: {openapi: {operationId: "upgradeSubscription"}}) do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
             BetterAuth::Stripe::Middleware.validate_trusted_urls!(ctx, body, success_url: "successUrl", cancel_url: "cancelUrl", return_url: "returnUrl")
@@ -62,7 +62,7 @@ module BetterAuth
             stripe_price_id_value = BetterAuth::Plugins.stripe_fetch(BetterAuth::Plugins.stripe_fetch(active_stripe_item || {}, "price") || {}, "id")
             same_plan = active_or_trialing && active_or_trialing["plan"].to_s.downcase == body[:plan].to_s.downcase
             same_seats = auto_managed_seats || (active_or_trialing && active_or_trialing["seats"].to_i == requested_seats.to_i)
-            same_price = !active_stripe || stripe_price_id_value == price_id
+            same_price = !!active_stripe && stripe_price_id_value == price_id
             valid_period = !active_or_trialing || !active_or_trialing["periodEnd"] || active_or_trialing["periodEnd"] > Time.now
             if active_or_trialing&.fetch("status", nil) == "active" && same_plan && same_seats && same_price && valid_period
               raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("ALREADY_SUBSCRIBED_PLAN"))

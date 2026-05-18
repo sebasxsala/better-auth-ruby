@@ -754,6 +754,64 @@ class BetterAuthPluginsStripeOrganizationTest < Minitest::Test
     assert_equal prices.uniq, prices
   end
 
+  def test_active_seat_only_upgrade_does_not_duplicate_subscription_item
+    stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      email_and_password: {enabled: true},
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.stripe(
+          stripe_client: stripe,
+          organization: {enabled: true},
+          subscription: {
+            enabled: true,
+            plans: [
+              {name: "starter", price_id: "price_starter_seat", seat_price_id: "price_starter_seat"},
+              {name: "team", price_id: "price_team_seat", seat_price_id: "price_team_seat"}
+            ],
+            authorize_reference: ->(_data, _ctx) { true }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, "seat-only-active@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => cookie}, body: {name: "Seat Only Active", slug: "seat-only-active"})
+    auth.context.adapter.update(model: "organization", where: [{field: "id", value: organization.fetch("id")}], update: {stripeCustomerId: "cus_seat_only_active"})
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "starter",
+        referenceId: organization.fetch("id"),
+        stripeCustomerId: "cus_seat_only_active",
+        stripeSubscriptionId: "sub_seat_only_active",
+        status: "active",
+        seats: 1,
+        periodEnd: Time.now + 86_400
+      }
+    )
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_seat_only_active", customer: "cus_seat_only_active", price_id: "price_starter_seat", quantity: 1)
+    ]
+
+    auth.api.upgrade_subscription(
+      headers: {"cookie" => cookie},
+      body: {
+        plan: "team",
+        customerType: "organization",
+        referenceId: organization.fetch("id"),
+        returnUrl: "/billing",
+        successUrl: "/success",
+        cancelUrl: "/cancel"
+      }
+    )
+
+    items = stripe.subscriptions.updated.last.fetch(:params).fetch(:items)
+    assert_equal 1, items.count { |item| item[:price] == "price_team_seat" }
+  end
+
   def test_metered_seat_upgrade_keeps_quantity_only_for_seat_item
     stripe = BetterAuthPluginsStripeTest::FakeStripeClient.new
     stripe.prices.retrieve_data["price_metered"] = {"id" => "price_metered", "recurring" => {"usage_type" => "metered"}}

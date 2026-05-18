@@ -8,5 +8,6 @@ class BetterAuthStripeRoutesStripeWebhookTest < Minitest::Test
 
     assert_equal "/stripe/webhook", endpoint.path
     assert_equal ["POST"], endpoint.methods
+    assert_equal true, endpoint.metadata.fetch(:hide)
   end
 end

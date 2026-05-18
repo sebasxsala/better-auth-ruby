@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/stripe/webhook", method: "POST", disable_body: true) do |ctx|
+          BetterAuth::Endpoint.new(path: "/stripe/webhook", method: "POST", metadata: {hide: true}, disable_body: true) do |ctx|
             signature = ctx.headers["stripe-signature"]
             raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_SIGNATURE_NOT_FOUND")) if signature.to_s.empty?
 
@@ -36,8 +36,13 @@ module BetterAuth
             raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("FAILED_TO_CONSTRUCT_STRIPE_EVENT")) unless event
             begin
               BetterAuth::Plugins.stripe_handle_event(ctx, event)
-            rescue
-              raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("STRIPE_WEBHOOK_ERROR"))
+            rescue => error
+              logger = ctx.context.logger
+              if logger.respond_to?(:error)
+                logger.error("Stripe webhook failed. Error: #{error.message}")
+              elsif logger.respond_to?(:call)
+                logger.call(:error, "Stripe webhook failed. Error: #{error.message}")
+              end
             end
             ctx.json({success: true})
           end

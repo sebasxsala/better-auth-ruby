@@ -14,5 +14,12 @@ class BetterAuthStripeRoutesUpgradeSubscriptionTest < Minitest::Test
 
     assert_equal "/subscription/upgrade", endpoints.fetch(:upgrade_subscription).path
     assert_equal ["POST"], endpoints.fetch(:upgrade_subscription).methods
+    assert_equal "upgradeSubscription", endpoints.fetch(:upgrade_subscription).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "cancelSubscription", endpoints.fetch(:cancel_subscription).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "cancelSubscriptionCallback", endpoints.fetch(:cancel_subscription_callback).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "restoreSubscription", endpoints.fetch(:restore_subscription).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "listActiveSubscriptions", endpoints.fetch(:list_active_subscriptions).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "subscriptionSuccess", endpoints.fetch(:subscription_success).metadata.fetch(:openapi).fetch(:operationId)
+    assert_equal "createBillingPortal", endpoints.fetch(:create_billing_portal).metadata.fetch(:openapi).fetch(:operationId)
   end
 end

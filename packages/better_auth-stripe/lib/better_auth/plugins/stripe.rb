@@ -284,28 +284,78 @@ module BetterAuth
       BetterAuth::Stripe::Utils.plan_line_items(plan)
     end
 
+    def stripe_line_item_delta(old_plan, plan)
+      delta = Hash.new(0)
+      stripe_plan_line_items(old_plan || {}).each do |item|
+        price = stripe_fetch(item, "price")
+        delta[price] -= 1 if price
+      end
+      stripe_plan_line_items(plan || {}).each do |item|
+        price = stripe_fetch(item, "price")
+        delta[price] += 1 if price
+      end
+      delta.delete_if { |_price, count| count == 0 }
+    end
+
+    def stripe_remove_quota(line_item_delta)
+      line_item_delta.each_with_object({}) do |(price, delta), result|
+        result[price] = -delta if delta.negative?
+      end
+    end
+
+    def stripe_consume_positive_delta(line_item_delta, price)
+      delta = line_item_delta[price]
+      return unless delta&.positive?
+
+      (delta == 1) ? line_item_delta.delete(price) : line_item_delta[price] = delta - 1
+    end
+
     def stripe_schedule_plan_change(ctx, config, active_stripe, db_subscription, plan, price_id, quantity, seat_only_plan, body)
       schedule = stripe_client(config).subscription_schedules.create(from_subscription: stripe_fetch(active_stripe, "id"))
       current_phase = Array(stripe_fetch(schedule, "phases")).first || {}
       current_items = Array(stripe_fetch(current_phase, "items"))
       active_item = stripe_resolve_plan_item(config, active_stripe)&.fetch(:item, nil) || stripe_subscription_item(active_stripe)
       active_price_id = stripe_fetch(stripe_fetch(active_item || {}, "price") || {}, "id")
-      replaced = false
+      active_price_present = current_items.any? do |item|
+        item_price = stripe_fetch(item, "price")
+        item_price = stripe_fetch(item_price, "id") if item_price.is_a?(Hash)
+        item_price == active_price_id
+      end
+      old_plan = db_subscription && stripe_plan_by_name(config, db_subscription["plan"])
+      line_item_delta = stripe_line_item_delta(old_plan, plan)
+      remove_quota = stripe_remove_quota(line_item_delta)
+      price_map = {}
+      if plan[:seat_price_id] && old_plan && old_plan[:seat_price_id] && old_plan[:seat_price_id] != plan[:seat_price_id]
+        price_map[old_plan[:seat_price_id]] = {price: plan[:seat_price_id], quantity: quantity}
+      end
       new_items = current_items.filter_map do |item|
         item_price = stripe_fetch(item, "price")
         item_price = stripe_fetch(item_price, "id") if item_price.is_a?(Hash)
+        quota = remove_quota[item_price].to_i
+        if quota.positive?
+          remove_quota[item_price] = quota - 1
+          next nil
+        end
+
+        replacement = price_map[item_price]
+        if replacement
+          next {price: replacement[:price], quantity: replacement[:quantity] || stripe_fetch(item, "quantity")}.compact
+        end
+
         if item_price == active_price_id
-          replaced = true
           next nil if seat_only_plan
 
-          stripe_line_item(config, price_id, quantity)
+          stripe_line_item(config, price_id, plan[:seat_price_id] ? 1 : quantity)
         else
+          stripe_consume_positive_delta(line_item_delta, item_price)
           {price: item_price, quantity: stripe_fetch(item, "quantity")}.compact
         end
       end
-      new_items << stripe_line_item(config, price_id, quantity) unless replaced || seat_only_plan
-      new_items << {price: plan[:seat_price_id], quantity: quantity} if plan[:seat_price_id]
-      new_items.concat(stripe_plan_line_items(plan))
+      new_items << stripe_line_item(config, price_id, plan[:seat_price_id] ? 1 : quantity) unless active_price_present || seat_only_plan
+      new_items << {price: plan[:seat_price_id], quantity: quantity} if plan[:seat_price_id] && !new_items.any? { |item| item[:price] == plan[:seat_price_id] }
+      line_item_delta.each do |price, delta|
+        delta.times { new_items << {price: price} } if delta.positive?
+      end
 
       stripe_client(config).subscription_schedules.update(
         stripe_fetch(schedule, "id"),
@@ -363,26 +413,32 @@ module BetterAuth
     def stripe_update_active_subscription_items(ctx, config, active_stripe, db_subscription, old_plan, plan, price_id, quantity, seat_only_plan, body)
       active_item = stripe_resolve_plan_item(config, active_stripe)&.fetch(:item, nil) || stripe_subscription_item(active_stripe)
       active_price_id = stripe_fetch(stripe_fetch(active_item || {}, "price") || {}, "id")
-      old_line_prices = stripe_plan_line_items(old_plan || {}).map { |item| item[:price] }
-      new_line_prices = stripe_plan_line_items(plan).map { |item| item[:price] }
-      added_line_prices = new_line_prices - old_line_prices
+      line_item_delta = stripe_line_item_delta(old_plan, plan)
+      remove_quota = stripe_remove_quota(line_item_delta)
+      price_map = {}
+      if plan[:seat_price_id] && old_plan && old_plan[:seat_price_id] && old_plan[:seat_price_id] != plan[:seat_price_id]
+        price_map[old_plan[:seat_price_id]] = {price: plan[:seat_price_id], quantity: quantity}
+      end
       items = []
       Array(stripe_fetch(stripe_fetch(active_stripe, "items") || {}, "data")).each do |item|
         item_price = stripe_fetch(stripe_fetch(item, "price") || {}, "id")
-        if item_price == active_price_id
+        quota = remove_quota[item_price].to_i
+        if quota.positive?
+          remove_quota[item_price] = quota - 1
+          items << {id: stripe_fetch(item, "id"), deleted: true}
+        elsif price_map[item_price]
+          replacement = price_map[item_price]
+          items << {id: stripe_fetch(item, "id"), price: replacement[:price], quantity: replacement[:quantity]}
+        elsif item_price == active_price_id
           items << stripe_line_item(config, price_id, plan[:seat_price_id] ? 1 : quantity).merge(id: stripe_fetch(item, "id")) unless seat_only_plan
-        elsif old_plan && item_price == old_plan[:seat_price_id] && plan[:seat_price_id]
-          items << {id: stripe_fetch(item, "id"), price: plan[:seat_price_id], quantity: quantity}
-        elsif old_line_prices.include?(item_price)
-          if new_line_prices.include?(item_price)
-            new_line_prices.delete_at(new_line_prices.index(item_price))
-          else
-            items << {id: stripe_fetch(item, "id"), deleted: true}
-          end
+        else
+          stripe_consume_positive_delta(line_item_delta, item_price)
         end
       end
       items << {price: plan[:seat_price_id], quantity: quantity} if plan[:seat_price_id] && !items.any? { |item| item[:price] == plan[:seat_price_id] || item[:id] && item[:price] == plan[:seat_price_id] }
-      added_line_prices.each { |price| items << {price: price} }
+      line_item_delta.each do |price, delta|
+        delta.times { items << {price: price} } if delta.positive?
+      end
       stripe_client(config).subscriptions.update(stripe_fetch(active_stripe, "id"), items: items, proration_behavior: plan[:proration_behavior] || "create_prorations")
       if db_subscription
         ctx.context.adapter.update(

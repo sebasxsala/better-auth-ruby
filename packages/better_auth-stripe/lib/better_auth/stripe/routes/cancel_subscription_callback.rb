@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/cancel/callback", method: "GET") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/cancel/callback", method: "GET", metadata: {openapi: {operationId: "cancelSubscriptionCallback"}}) do |ctx|
             query = BetterAuth::Plugins.normalize_hash(ctx.query)
             callback = query[:callback_url] || "/"
             BetterAuth::Stripe::Middleware.validate_trusted_url!(ctx, callback, "callbackURL")
@@ -18,6 +18,7 @@ module BetterAuth
             raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback)) unless session
 
             subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "id", value: query[:subscription_id]}])
+            raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback)) if subscription && !BetterAuth::Stripe::Middleware.authorized_subscription?(ctx, session, subscription, "cancel-subscription", config || {})
             if subscription && !BetterAuth::Plugins.stripe_pending_cancel?(subscription) && subscription["stripeCustomerId"]
               current = BetterAuth::Plugins.stripe_active_subscriptions(config || {}, subscription["stripeCustomerId"]).find { |entry| BetterAuth::Plugins.stripe_fetch(entry, "id") == subscription["stripeSubscriptionId"] }
               if current && BetterAuth::Plugins.stripe_stripe_pending_cancel?(current)

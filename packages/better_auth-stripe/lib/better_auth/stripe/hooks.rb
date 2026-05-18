@@ -53,6 +53,8 @@ module BetterAuth
 
       def on_subscription_created(ctx, event)
         config = stripe_config(ctx)
+        return unless config.dig(:subscription, :enabled)
+
         object = BetterAuth::Plugins.normalize_hash(event.dig(:data, :object) || {})
         customer_id = object[:customer].to_s
         return if customer_id.empty?
@@ -91,6 +93,8 @@ module BetterAuth
 
       def on_subscription_updated(ctx, event)
         config = stripe_config(ctx)
+        return unless config.dig(:subscription, :enabled)
+
         object = BetterAuth::Plugins.normalize_hash(event.dig(:data, :object) || {})
         resolved = BetterAuth::Stripe::Utils.resolve_plan_item(config, object)
         return unless resolved
@@ -135,6 +139,8 @@ module BetterAuth
 
       def on_subscription_deleted(ctx, event)
         config = stripe_config(ctx)
+        return unless config.dig(:subscription, :enabled)
+
         object = BetterAuth::Plugins.normalize_hash(event.dig(:data, :object) || {})
         subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "stripeSubscriptionId", value: object[:id]}])
         return unless subscription

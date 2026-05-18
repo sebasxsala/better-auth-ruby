@@ -48,6 +48,28 @@ module BetterAuth
         nil
       end
 
+      def authorized_subscription?(ctx, session, subscription, action, config)
+        reference_id = subscription && subscription["referenceId"]
+        return false if reference_id.to_s.empty?
+        return true if reference_id == session.fetch(:user).fetch("id")
+
+        subscription_options = BetterAuth::Stripe::Utils.subscription_options(config)
+        if config.dig(:organization, :enabled)
+          org = ctx.context.adapter.find_one(model: "organization", where: [{field: "id", value: reference_id}])
+          if org
+            return false unless subscription_options[:authorize_reference]
+
+            authorize_reference!(ctx, session, reference_id, action, "organization", subscription_options, explicit: true)
+            return true
+          end
+        end
+
+        authorize_reference!(ctx, session, reference_id, action, "user", subscription_options, explicit: true)
+        true
+      rescue BetterAuth::APIError
+        false
+      end
+
       def validate_trusted_url!(ctx, value, label)
         return if value.nil? || value.to_s.empty?
 

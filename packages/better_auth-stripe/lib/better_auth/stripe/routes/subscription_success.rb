@@ -7,12 +7,12 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/success", method: "GET") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/success", method: "GET", metadata: {openapi: {operationId: "subscriptionSuccess"}}) do |ctx|
             query = BetterAuth::Plugins.normalize_hash(ctx.query)
             callback = query[:callback_url] || "/"
             BetterAuth::Stripe::Middleware.validate_trusted_url!(ctx, callback, "callbackURL")
             checkout_session_id = query[:checkout_session_id]
-            subscription_id = query[:subscription_id]
+            subscription_id = nil
             if checkout_session_id
               callback = callback.to_s.gsub("{CHECKOUT_SESSION_ID}", checkout_session_id.to_s)
               checkout_session = begin
@@ -34,6 +34,7 @@ module BetterAuth
 
             subscription = ctx.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription_id}])
             raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback)) unless subscription
+            raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback)) unless BetterAuth::Stripe::Middleware.authorized_subscription?(ctx, session, subscription, "subscription-success", config || {})
             raise ctx.redirect(BetterAuth::Plugins.stripe_url(ctx, callback)) if BetterAuth::Plugins.stripe_active_or_trialing?(subscription)
 
             customer_id = subscription["stripeCustomerId"] || session.fetch(:user)["stripeCustomerId"]

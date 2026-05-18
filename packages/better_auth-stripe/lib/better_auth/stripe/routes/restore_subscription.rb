@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/restore", method: "POST") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/restore", method: "POST", metadata: {openapi: {operationId: "restoreSubscription"}}) do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
             customer_type = BetterAuth::Plugins.stripe_customer_type!(body)
@@ -26,9 +26,11 @@ module BetterAuth
               next ctx.json(BetterAuth::Plugins.stripe_stringify_keys(schedule))
             end
 
-            raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("SUBSCRIPTION_NOT_SCHEDULED_FOR_CANCELLATION")) unless BetterAuth::Plugins.stripe_pending_cancel?(subscription)
+            raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("SUBSCRIPTION_NOT_PENDING_CHANGE")) unless BetterAuth::Plugins.stripe_pending_cancel?(subscription)
 
-            active = BetterAuth::Plugins.stripe_active_subscriptions(config, subscription["stripeCustomerId"]).first
+            active = BetterAuth::Plugins.stripe_active_subscriptions(config, subscription["stripeCustomerId"]).find do |entry|
+              BetterAuth::Plugins.stripe_fetch(entry, "id") == subscription["stripeSubscriptionId"]
+            end
             raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Stripe::ERROR_CODES.fetch("SUBSCRIPTION_NOT_FOUND")) unless active
 
             update_params = if BetterAuth::Plugins.stripe_fetch(active, "cancel_at")

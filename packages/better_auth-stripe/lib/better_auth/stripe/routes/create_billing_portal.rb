@@ -7,7 +7,7 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/subscription/billing-portal", method: "POST") do |ctx|
+          BetterAuth::Endpoint.new(path: "/subscription/billing-portal", method: "POST", metadata: {openapi: {operationId: "createBillingPortal"}}) do |ctx|
             session = BetterAuth::Routes.current_session(ctx)
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
             BetterAuth::Stripe::Middleware.validate_trusted_urls!(ctx, body, return_url: "returnUrl")

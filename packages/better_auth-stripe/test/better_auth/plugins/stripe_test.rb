@@ -644,8 +644,9 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       data: {plan: "pro", referenceId: user.fetch("id"), stripeCustomerId: "cus_states", stripeSubscriptionId: "sub_states", status: "incomplete"}
     )
     stripe.subscriptions.list_data = [stripe_subscription(id: "sub_states", customer: "cus_states", price_id: "price_pro", status: "active", quantity: 2)]
+    stripe.checkout.retrieve_data["cs_states"] = {"id" => "cs_states", "metadata" => {"subscriptionId" => subscription.fetch("id")}}
 
-    status, headers, = auth.api.subscription_success(headers: {"cookie" => cookie}, query: {callbackURL: "/done", subscriptionId: subscription.fetch("id")}, as_response: true)
+    status, headers, = auth.api.subscription_success(headers: {"cookie" => cookie}, query: {callbackURL: "/done", checkoutSessionId: "cs_states"}, as_response: true)
     assert_equal 302, status
     assert_equal "http://localhost:3000/api/auth/done", headers.fetch("location")
     synced = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: subscription.fetch("id")}])
@@ -689,7 +690,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_nil stripe.webhooks.constructed_sync_args
   end
 
-  def test_webhook_processing_errors_return_webhook_error
+  def test_webhook_processing_errors_are_logged_without_failing_response
     stripe = FakeStripeClient.new
     auth = build_auth(
       stripe_client: stripe,
@@ -697,11 +698,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
       on_event: ->(_event) { raise "processing failed" }
     )
 
-    error = assert_raises(BetterAuth::APIError) do
-      auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "invoice.paid"})
-    end
-
-    assert_equal "Stripe webhook error", error.message
+    assert_equal({success: true}, auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "invoice.paid"}))
   end
 
   def test_webhook_rejects_missing_signature
@@ -1163,7 +1160,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     error = assert_raises(BetterAuth::APIError) do
       auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_restore_reject"})
     end
-    assert_equal "Subscription is not scheduled for cancellation", error.message
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("SUBSCRIPTION_NOT_PENDING_CHANGE"), error.message
   end
 
   def test_cancel_fallback_syncs_when_stripe_reports_already_canceled
@@ -1639,6 +1636,178 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     assert_empty stripe.billing_portal.created
   end
 
+  def test_subscription_webhooks_are_ignored_when_subscriptions_disabled
+    stripe = FakeStripeClient.new
+    stripe.webhooks.async_event = {
+      type: "customer.subscription.created",
+      data: {object: stripe_subscription(id: "sub_disabled", customer: "cus_disabled", price_id: "price_pro")}
+    }
+    auth = build_auth(stripe_client: stripe, stripe_webhook_secret: "whsec_test", subscription: {enabled: false, plans: []})
+    create_user(auth, email: "disabled-webhook@example.com", stripeCustomerId: "cus_disabled")
+
+    assert_equal({success: true}, auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: "{}"))
+    assert_empty auth.context.adapter.find_many(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_disabled"}])
+  end
+
+  def test_valid_webhook_processing_errors_do_not_fail_response
+    stripe = FakeStripeClient.new
+    auth = build_auth(
+      stripe_client: stripe,
+      stripe_webhook_secret: "whsec_test",
+      on_event: ->(_event) { raise "handler failed" }
+    )
+
+    assert_equal({success: true}, auth.api.stripe_webhook(headers: {"stripe-signature" => "valid"}, body: {type: "invoice.paid"}))
+  end
+
+  def test_success_and_cancel_callbacks_do_not_mutate_another_users_subscription
+    stripe = FakeStripeClient.new
+    callbacks = []
+    auth = build_auth(
+      stripe_client: stripe,
+      subscription: subscription_options.merge(on_subscription_cancel: ->(data) { callbacks << data })
+    )
+    owner_cookie = sign_up_cookie(auth, email: "callback-owner@example.com")
+    owner = auth.api.get_session(headers: {"cookie" => owner_cookie})[:user]
+    intruder_cookie = sign_up_cookie(auth, email: "callback-intruder@example.com")
+    owner_subscription = auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: owner.fetch("id"),
+        stripeCustomerId: "cus_owner_callback",
+        stripeSubscriptionId: "sub_owner_callback",
+        status: "incomplete",
+        seats: 1
+      }
+    )
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_owner_callback", customer: "cus_owner_callback", price_id: "price_pro", cancel_at_period_end: true, canceled_at: 1_700_000_100)
+    ]
+
+    status, _headers, = auth.api.subscription_success(headers: {"cookie" => intruder_cookie}, query: {callbackURL: "/done", subscriptionId: owner_subscription.fetch("id")}, as_response: true)
+    assert_equal 302, status
+    unchanged = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: owner_subscription.fetch("id")}])
+    assert_equal "incomplete", unchanged.fetch("status")
+    assert_nil unchanged["periodStart"]
+
+    status, _headers, = auth.api.cancel_subscription_callback(headers: {"cookie" => intruder_cookie}, query: {callbackURL: "/done", subscriptionId: owner_subscription.fetch("id")}, as_response: true)
+    assert_equal 302, status
+    unchanged = auth.context.adapter.find_one(model: "subscription", where: [{field: "id", value: owner_subscription.fetch("id")}])
+    refute unchanged["cancelAtPeriodEnd"]
+    assert_empty callbacks
+  end
+
+  def test_restore_updates_matching_stripe_subscription
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "restore-match@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {
+        plan: "pro",
+        referenceId: user.fetch("id"),
+        stripeCustomerId: "cus_restore_match",
+        stripeSubscriptionId: "sub_restore_target",
+        status: "active",
+        cancelAtPeriodEnd: true,
+        periodEnd: Time.now + 86_400
+      }
+    )
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_restore_other", customer: "cus_restore_match", price_id: "price_pro", cancel_at_period_end: true),
+      stripe_subscription(id: "sub_restore_target", customer: "cus_restore_match", price_id: "price_pro", cancel_at_period_end: true)
+    ]
+
+    auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_restore_target"})
+    assert_equal "sub_restore_target", stripe.subscriptions.updated.last.fetch(:id)
+  end
+
+  def test_restore_uses_pending_change_error_when_no_cancel_or_schedule
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "restore-no-pending@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {plan: "pro", referenceId: user.fetch("id"), stripeCustomerId: "cus_no_pending", stripeSubscriptionId: "sub_no_pending", status: "active"}
+    )
+
+    error = assert_raises(BetterAuth::APIError) { auth.api.restore_subscription(headers: {"cookie" => cookie}, body: {subscriptionId: "sub_no_pending"}) }
+    assert_equal BetterAuth::Stripe::ERROR_CODES.fetch("SUBSCRIPTION_NOT_PENDING_CHANGE"), error.message
+  end
+
+  def test_stale_local_active_subscription_does_not_block_checkout_recovery
+    stripe = FakeStripeClient.new
+    auth = build_auth(stripe_client: stripe)
+    cookie = sign_up_cookie(auth, email: "stale-active@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.internal_adapter.update_user(user.fetch("id"), stripeCustomerId: "cus_stale_active")
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {plan: "pro", referenceId: user.fetch("id"), stripeCustomerId: "cus_stale_active", stripeSubscriptionId: "sub_stale_missing", status: "active", seats: 1, periodEnd: Time.now + 86_400}
+    )
+    stripe.subscriptions.list_data = []
+
+    checkout = auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "pro", successUrl: "/success", cancelUrl: "/cancel"})
+    assert_equal "https://stripe.test/checkout", checkout.fetch(:url)
+  end
+
+  def test_direct_and_scheduled_upgrades_do_not_duplicate_existing_new_line_items
+    stripe = FakeStripeClient.new
+    auth = build_auth(
+      stripe_client: stripe,
+      subscription: {
+        enabled: true,
+        plans: [
+          {name: "basic", price_id: "price_basic_base", line_items: [{price: "price_basic_events"}]},
+          {name: "premium", price_id: "price_premium_base", line_items: [{price: "price_premium_events"}, {price: "price_premium_security"}]}
+        ]
+      }
+    )
+    cookie = sign_up_cookie(auth, email: "duplicate-line-items@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    auth.context.internal_adapter.update_user(user.fetch("id"), stripeCustomerId: "cus_duplicate_lines")
+    auth.context.adapter.create(
+      model: "subscription",
+      data: {plan: "basic", referenceId: user.fetch("id"), stripeCustomerId: "cus_duplicate_lines", stripeSubscriptionId: "sub_duplicate_lines", status: "active", seats: 1, periodEnd: Time.now + 86_400}
+    )
+    current_items = [
+      {id: "si_basic_base", quantity: 1, price: {id: "price_basic_base"}},
+      {id: "si_basic_events", quantity: nil, price: {id: "price_basic_events"}},
+      {id: "si_existing_security", quantity: nil, price: {id: "price_premium_security"}}
+    ]
+    stripe.subscriptions.list_data = [
+      stripe_subscription(id: "sub_duplicate_lines", customer: "cus_duplicate_lines", price_id: "price_basic_base", extra_items: current_items.drop(1))
+    ]
+
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "premium", successUrl: "/success", cancelUrl: "/cancel", returnUrl: "/billing"})
+    direct_items = stripe.subscriptions.updated.last.fetch(:params).fetch(:items)
+    assert_empty direct_items.select { |item| !item[:id] && item[:price] == "price_premium_security" }
+
+    auth.context.adapter.update(model: "subscription", where: [{field: "stripeSubscriptionId", value: "sub_duplicate_lines"}], update: {plan: "basic"})
+    stripe.subscription_schedules.create_result = {
+      "id" => "sched_duplicate_lines",
+      "status" => "active",
+      "phases" => [
+        {
+          "start_date" => 1_700_000_000,
+          "end_date" => 1_700_086_400,
+          "items" => [
+            {"price" => {"id" => "price_basic_base"}, "quantity" => 1},
+            {"price" => {"id" => "price_basic_events"}, "quantity" => nil},
+            {"price" => {"id" => "price_premium_security"}, "quantity" => nil}
+          ]
+        }
+      ]
+    }
+
+    auth.api.upgrade_subscription(headers: {"cookie" => cookie}, body: {plan: "premium", scheduleAtPeriodEnd: true, successUrl: "/success", cancelUrl: "/cancel", returnUrl: "/billing"})
+    scheduled_items = stripe.subscription_schedules.updated.last.fetch(:params).fetch(:phases).fetch(1).fetch(:items)
+    assert_equal 1, scheduled_items.count { |item| item[:price] == "price_premium_security" }
+  end
+
   private
 
   def build_auth(options = {})
@@ -1890,7 +2059,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
     end
 
     class SubscriptionSchedules
-      attr_accessor :list_data
+      attr_accessor :list_data, :create_result
       attr_reader :created, :updated, :released, :retrieve_data
 
       def initialize
@@ -1903,7 +2072,7 @@ class BetterAuthPluginsStripeTest < Minitest::Test
 
       def create(params)
         created << params
-        {
+        create_result || {
           "id" => "sched_1",
           "status" => "active",
           "phases" => [
