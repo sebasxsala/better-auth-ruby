@@ -62,6 +62,11 @@ module BetterAuth
 
             begin
               response = Credentials.webauthn_response(body[:response])
+              credential_id = Credentials.response_credential_id(response)
+              if credential_id && ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential_id}])
+                ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+                raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"))
+              end
               relying_party = Utils.relying_party(config, ctx, origin: origin)
               credential = WebAuthn::Credential.from_create(response, relying_party: relying_party)
               credential.verify(challenge.fetch("expectedChallenge"), user_verification: false)
@@ -82,21 +87,30 @@ module BetterAuth
               raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"))
             end
 
-            data = ctx.context.adapter.create(
-              model: "passkey",
-              data: {
-                name: body[:name],
-                userId: target_user_id,
-                credentialID: credential.id,
-                publicKey: Base64.strict_encode64(credential.public_key),
-                counter: credential.sign_count,
-                deviceType: authenticator_data&.credential_backup_eligible? ? "multiDevice" : "singleDevice",
-                backedUp: authenticator_data&.credential_backed_up? || false,
-                transports: Array(Credentials.attestation_response(credential)&.transports).join(","),
-                createdAt: Time.now,
-                aaguid: Credentials.attestation_response(credential)&.aaguid
-              }
-            )
+            begin
+              data = ctx.context.adapter.create(
+                model: "passkey",
+                data: {
+                  name: body[:name],
+                  userId: target_user_id,
+                  credentialID: credential.id,
+                  publicKey: Base64.strict_encode64(credential.public_key),
+                  counter: credential.sign_count,
+                  deviceType: authenticator_data&.credential_backup_eligible? ? "multiDevice" : "singleDevice",
+                  backedUp: authenticator_data&.credential_backed_up? || false,
+                  transports: Array(Credentials.attestation_response(credential)&.transports).join(","),
+                  createdAt: Time.now,
+                  aaguid: Credentials.attestation_response(credential)&.aaguid
+                }
+              )
+            rescue => error
+              ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
+              if Credentials.duplicate_credential_error?(error)
+                raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"))
+              end
+              ctx.context.logger&.error("Failed to create passkey", error)
+              raise APIError.new("INTERNAL_SERVER_ERROR", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"))
+            end
             ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)
             ctx.json(Credentials.wire(data))
           rescue APIError

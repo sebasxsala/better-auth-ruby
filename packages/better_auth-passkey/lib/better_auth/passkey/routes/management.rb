@@ -19,11 +19,14 @@ module BetterAuth
             session = BetterAuth::Routes.current_session(ctx)
             body = Utils.normalize_hash(ctx.body)
             Utils.require_string!(body, :id)
-            passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
+            passkey = ctx.context.adapter.find_one(
+              model: "passkey",
+              where: [
+                {field: "id", value: body[:id]},
+                {field: "userId", value: session.fetch(:user).fetch("id")}
+              ]
+            )
             raise APIError.new("NOT_FOUND", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-            unless passkey.fetch("userId") == session.fetch(:user).fetch("id")
-              raise APIError.new("UNAUTHORIZED", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"))
-            end
 
             ctx.context.adapter.delete(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
             ctx.json({status: true})
@@ -39,11 +42,14 @@ module BetterAuth
               raise APIError.new("BAD_REQUEST", message: BASE_ERROR_CODES.fetch("VALIDATION_ERROR"))
             end
 
-            passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "id", value: body[:id]}])
+            passkey = ctx.context.adapter.find_one(
+              model: "passkey",
+              where: [
+                {field: "id", value: body[:id]},
+                {field: "userId", value: session.fetch(:user).fetch("id")}
+              ]
+            )
             raise APIError.new("NOT_FOUND", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
-            if passkey.fetch("userId") != session.fetch(:user).fetch("id")
-              raise APIError.new("UNAUTHORIZED", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("YOU_ARE_NOT_ALLOWED_TO_REGISTER_THIS_PASSKEY"))
-            end
 
             updated = ctx.context.adapter.update(
               model: "passkey",

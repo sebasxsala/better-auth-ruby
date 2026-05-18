@@ -134,6 +134,117 @@ class BetterAuthPasskeyRoutesRegistrationTest < Minitest::Test
     assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
   end
 
+  def test_verify_registration_rejects_unconfigured_request_origin
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "evil-origin-registration-route@example.com")
+    evil_origin = "http://evil.localhost:3000"
+    client = WebAuthn::FakeClient.new(evil_origin)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => evil_origin},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
+  end
+
+  def test_verify_registration_invalidates_challenge_after_callback_error
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.passkey(
+          registration: {
+            after_verification: ->(_data) { raise "callback failed" }
+          }
+        )
+      ]
+    )
+    cookie = sign_up_cookie(auth, email: "callback-error-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    verification = auth.context.adapter.find_many(model: "verification").last
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(
+        headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+        body: {response: response}
+      )
+    end
+
+    assert_equal 500, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
+    assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
+  end
+
+  def test_verify_registration_invalidates_challenge_after_passkey_create_error
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "create-error-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    verification = auth.context.adapter.find_many(model: "verification").last
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.context.adapter.stub(:create, ->(**_kwargs) { raise "create failed" }) do
+        auth.api.verify_passkey_registration(
+          headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+          body: {response: response}
+        )
+      end
+    end
+
+    assert_equal 500, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
+    assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
+  end
+
+  def test_verify_registration_rejects_known_duplicate_before_webauthn_verification
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "early-duplicate-registration-route@example.com")
+    user = auth.api.get_session(headers: {"cookie" => cookie})[:user]
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    create_passkey(auth, user_id: user.fetch("id"), name: "Existing", credential_id: response.fetch("id"))
+
+    error = assert_raises(BetterAuth::APIError) do
+      WebAuthn::Credential.stub(:from_create, ->(*) { raise "from_create should not be called" }) do
+        auth.api.verify_passkey_registration(
+          headers: {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN},
+          body: {response: response}
+        )
+      end
+    end
+
+    assert_equal 400, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PREVIOUSLY_REGISTERED"), error.message
+  end
+
+  def test_verify_registration_consumes_successful_challenge
+    auth = build_auth
+    cookie = sign_up_cookie(auth, email: "success-replay-registration-route@example.com")
+    client = WebAuthn::FakeClient.new(ORIGIN)
+    registration = auth.api.generate_passkey_registration_options(headers: {"cookie" => cookie}, return_headers: true)
+    verification = auth.context.adapter.find_many(model: "verification").last
+    response = client.create(challenge: registration.fetch(:response).fetch(:challenge), rp_id: "localhost")
+    headers = {"cookie" => [cookie, cookie_header(registration.fetch(:headers).fetch("set-cookie"))].join("; "), "origin" => ORIGIN}
+
+    auth.api.verify_passkey_registration(headers: headers, body: {response: response})
+
+    replay = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_passkey_registration(headers: headers, body: {response: response})
+    end
+
+    assert_equal 400, replay.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("CHALLENGE_NOT_FOUND"), replay.message
+    assert_nil auth.context.adapter.find_one(model: "verification", where: [{field: "id", value: verification.fetch("id")}])
+  end
+
   def test_registration_extensions_are_omitted_when_absent
     auth = build_auth
     cookie = sign_up_cookie(auth, email: "no-registration-extensions@example.com")

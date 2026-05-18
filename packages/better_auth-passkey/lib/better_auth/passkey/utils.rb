@@ -25,17 +25,22 @@ module BetterAuth
       end
 
       def allowed_origins(config, ctx, origin: nil)
-        Array(origin || config[:origin] || ctx.context.options.base_url).compact
+        _request_origin = origin
+        configured = config.key?(:origin) ? config[:origin] : nil
+        origins = configured || context_base_url(ctx)
+        Array(origins).compact.map { |value| origin_for(value) }
       end
 
       def rp_id(config, ctx)
         return config[:rp_id] if config[:rp_id]
 
-        base_url = ctx.context.options.base_url.to_s
+        base_url = context_base_url(ctx).to_s
         return "localhost" if base_url.empty?
 
         URI.parse(base_url).host || "localhost"
       rescue URI::InvalidURIError
+        raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION")) if strict_base_url?(ctx)
+
         "localhost"
       end
 
@@ -168,6 +173,31 @@ module BetterAuth
         else
           callback.call(data)
         end
+      end
+
+      def context_base_url(ctx)
+        if ctx.context.respond_to?(:base_url)
+          ctx.context.base_url
+        else
+          ctx.context.options.base_url
+        end
+      end
+
+      def strict_base_url?(ctx)
+        return ctx.context.passkey_strict_base_url? if ctx.context.respond_to?(:passkey_strict_base_url?)
+
+        true
+      end
+
+      def origin_for(value)
+        uri = URI.parse(value.to_s)
+        if uri.scheme && uri.host
+          BetterAuth::Configuration.origin_for(uri) || value.to_s
+        else
+          value.to_s
+        end
+      rescue URI::InvalidURIError
+        value.to_s
       end
     end
   end

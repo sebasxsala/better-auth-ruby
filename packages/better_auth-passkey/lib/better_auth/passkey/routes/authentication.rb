@@ -54,7 +54,12 @@ module BetterAuth
             begin
               response = Credentials.webauthn_response(body[:response])
               credential_id = response.fetch("id")
-              passkey = ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential_id}])
+              passkey = begin
+                ctx.context.adapter.find_one(model: "passkey", where: [{field: "credentialID", value: credential_id}])
+              rescue => error
+                ctx.context.logger&.error("Failed to find passkey", error)
+                raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"))
+              end
               raise APIError.new("UNAUTHORIZED", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
 
               relying_party = Utils.relying_party(config, ctx, origin: origin)
@@ -70,16 +75,20 @@ module BetterAuth
                 verification: credential,
                 client_data: response
               })
-              ctx.context.adapter.update(
+              updated_passkey = ctx.context.adapter.update(
                 model: "passkey",
                 where: [{field: "id", value: passkey.fetch("id")}],
                 update: {counter: credential.sign_count}
               )
-              session = ctx.context.internal_adapter.create_session(passkey.fetch("userId"))
-              raise APIError.new("INTERNAL_SERVER_ERROR", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("UNABLE_TO_CREATE_SESSION")) unless session
+              unless updated_passkey
+                raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"))
+              end
 
               user = ctx.context.internal_adapter.find_user_by_id(passkey.fetch("userId"))
               raise APIError.new("INTERNAL_SERVER_ERROR", message: "User not found") unless user
+
+              session = ctx.context.internal_adapter.create_session(passkey.fetch("userId"))
+              raise APIError.new("INTERNAL_SERVER_ERROR", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("UNABLE_TO_CREATE_SESSION")) unless session
 
               Cookies.set_session_cookie(ctx, {session: session, user: user})
               ctx.context.internal_adapter.delete_verification_by_identifier(verification_token)

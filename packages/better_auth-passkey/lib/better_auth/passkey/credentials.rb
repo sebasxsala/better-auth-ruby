@@ -47,6 +47,17 @@ module BetterAuth
         record["credentialID"] || record["credentialId"] || record[:credentialID] || record[:credential_id]
       end
 
+      def response_credential_id(response)
+        return nil unless response.is_a?(Hash)
+
+        response["id"] || response[:id]
+      end
+
+      def duplicate_credential_error?(error)
+        message = "#{error.class.name} #{error.message}".downcase
+        message.include?("credential") && (message.include?("unique") || message.include?("duplicate") || message.include?("constraint"))
+      end
+
       def credential_descriptor(record, kind: :allow)
         descriptor = {id: credential_id(record)}
         descriptor[:type] = "public-key" if kind == :allow

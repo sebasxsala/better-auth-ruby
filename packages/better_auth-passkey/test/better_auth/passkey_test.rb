@@ -411,13 +411,13 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     unauthorized = assert_raises(BetterAuth::APIError) do
       auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: second.fetch("id")})
     end
-    assert_equal 401, unauthorized.status_code
+    assert_equal 404, unauthorized.status_code
     assert auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: second.fetch("id")}])
 
     update_unauthorized = assert_raises(BetterAuth::APIError) do
       auth.api.update_passkey(headers: {"cookie" => first_cookie}, body: {id: second.fetch("id"), name: "Hacked"})
     end
-    assert_equal 401, update_unauthorized.status_code
+    assert_equal 404, update_unauthorized.status_code
     assert_equal "Second", auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: second.fetch("id")}]).fetch("name")
 
     deleted = auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: first.fetch("id")})
@@ -651,7 +651,7 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
       auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: other_passkey.fetch("id")})
     end
 
-    assert_equal "UNAUTHORIZED", error.code
+    assert_equal "NOT_FOUND", error.code
     assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"), error.message
   end
 
@@ -691,10 +691,14 @@ class BetterAuthPluginsPasskeyTest < Minitest::Test
     assert_equal "example.com", rp_id
   end
 
-  def test_rp_id_returns_localhost_when_base_url_is_invalid
+  def test_rp_id_rejects_invalid_base_url
     ctx = build_passkey_ctx(base_url: "not a url")
-    rp_id = BetterAuth::Plugins.send(:passkey_rp_id, {}, ctx)
-    assert_equal "localhost", rp_id
+
+    error = assert_raises(BetterAuth::APIError) do
+      BetterAuth::Plugins.send(:passkey_rp_id, {}, ctx)
+    end
+
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("FAILED_TO_VERIFY_REGISTRATION"), error.message
   end
 
   def test_rp_id_returns_localhost_when_base_url_is_blank
