@@ -79,6 +79,34 @@ RSpec.describe BetterAuth::Rails::Routing do
     expect(response["set-cookie"]).to include("rails_probe=1")
   end
 
+  it "keeps server-only plugin endpoints unreachable through the Rails mount" do
+    called = false
+    plugin = BetterAuth::Plugin.new(
+      id: "server-only",
+      endpoints: {
+        private_probe: BetterAuth::Endpoint.new(path: "/private-probe", method: "GET", metadata: {SERVER_ONLY: true}) do |_ctx|
+          called = true
+          {private: true}
+        end,
+        scoped_probe: BetterAuth::Endpoint.new(path: "/scoped-probe", method: "GET", metadata: {scope: "server"}) do |_ctx|
+          called = true
+          {private: true}
+        end
+      }
+    )
+    auth = BetterAuth.auth(secret: secret, plugins: [plugin])
+    app = build_route_set do
+      better_auth auth: auth
+    end
+
+    private_response = Rack::MockRequest.new(app).get("/api/auth/private-probe")
+    scoped_response = Rack::MockRequest.new(app).get("/api/auth/scoped-probe")
+
+    expect(private_response.status).to eq(403)
+    expect(scoped_response.status).to eq(403)
+    expect(called).to be(false)
+  end
+
   it "keeps core origin checks active for mutating mounted requests with cookies" do
     auth = BetterAuth.auth(secret: secret)
     app = build_route_set do
@@ -94,6 +122,108 @@ RSpec.describe BetterAuth::Rails::Routing do
 
     expect(response.status).to eq(403)
     expect(JSON.parse(response.body)).to eq("code" => "FORBIDDEN", "message" => "Missing or null Origin")
+  end
+
+  it "rejects malicious callback URLs through the Rails mount" do
+    auth = BetterAuth.auth(
+      secret: secret,
+      database: :memory,
+      email_and_password: {enabled: true},
+      trusted_origins: ["http://localhost:3000"]
+    )
+    app = build_route_set do
+      better_auth auth: auth
+    end
+
+    response = Rack::MockRequest.new(app).post(
+      "/api/auth/sign-up/email",
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://localhost:3000",
+      :input => JSON.generate(email: "ada@example.com", password: "password123", name: "Ada", callbackURL: "https://evil.example/callback")
+    )
+
+    expect(response.status).to eq(403)
+    expect(JSON.parse(response.body)).to eq("code" => "FORBIDDEN", "message" => "Invalid callbackURL")
+  end
+
+  it "dispatches correctly when Rails is mounted below an outer script name" do
+    auth = BetterAuth.auth(secret: secret, base_path: "/api/auth")
+    app = BetterAuth::Rails::MountedApp.new(auth, mount_path: "/api/auth")
+
+    status, _headers, body = app.call(
+      Rack::MockRequest.env_for(
+        "/tenant/api/auth/ok",
+        "SCRIPT_NAME" => "/tenant/api/auth",
+        "PATH_INFO" => "/ok"
+      )
+    )
+
+    expect(status).to eq(200)
+    expect(JSON.parse(body.join)).to eq("ok" => true)
+  end
+
+  it "converts unexpected mounted endpoint errors into Better Auth JSON errors" do
+    plugin = BetterAuth::Plugin.new(
+      id: "raising",
+      endpoints: {
+        boom: BetterAuth::Endpoint.new(path: "/boom", method: "GET") do |_ctx|
+          raise "boom"
+        end
+      }
+    )
+    auth = BetterAuth.auth(secret: secret, plugins: [plugin])
+    app = build_route_set do
+      better_auth auth: auth
+    end
+
+    response = Rack::MockRequest.new(app).get("/api/auth/boom")
+
+    expect(response.status).to eq(500)
+    expect(JSON.parse(response.body)).to eq("code" => "INTERNAL_SERVER_ERROR", "message" => "Internal Server Error")
+  end
+
+  it "honors on_api_error callbacks for unexpected mounted endpoint errors" do
+    captured = []
+    plugin = BetterAuth::Plugin.new(
+      id: "callback-raising",
+      endpoints: {
+        boom: BetterAuth::Endpoint.new(path: "/boom", method: "GET") do |_ctx|
+          raise "boom"
+        end
+      }
+    )
+    auth = BetterAuth.auth(
+      secret: secret,
+      plugins: [plugin],
+      on_api_error: {on_error: ->(error, ctx) { captured << [error.message, ctx.path] }}
+    )
+    app = build_route_set do
+      better_auth auth: auth
+    end
+
+    response = Rack::MockRequest.new(app).get("/api/auth/boom")
+
+    expect(response.status).to eq(500)
+    expect(captured).to eq([["boom", "/boom"]])
+  end
+
+  it "re-raises unexpected mounted endpoint errors when on_api_error throw is enabled" do
+    plugin = BetterAuth::Plugin.new(
+      id: "throwing",
+      endpoints: {
+        boom: BetterAuth::Endpoint.new(path: "/boom", method: "GET") do |_ctx|
+          raise "boom"
+        end
+      }
+    )
+    auth = BetterAuth.auth(secret: secret, plugins: [plugin], on_api_error: {throw: true})
+    app = build_route_set do
+      better_auth auth: auth
+    end
+
+    expect {
+      Rack::MockRequest.new(app).get("/api/auth/boom")
+    }.to raise_error(RuntimeError, "boom")
   end
 
   def build_route_set(&block)

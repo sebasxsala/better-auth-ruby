@@ -5,14 +5,23 @@ require_relative "../../spec_helper"
 class BetterAuthRailsHelperController
   include BetterAuth::Rails::ControllerHelpers
 
-  attr_reader :request, :head_status
+  attr_reader :request, :response, :head_status
 
-  def initialize(request)
+  def initialize(request, response: nil)
     @request = request
+    @response = response
   end
 
   def head(status)
     @head_status = status
+  end
+end
+
+class BetterAuthRailsFakeResponse
+  attr_reader :headers
+
+  def initialize
+    @headers = {}
   end
 end
 
@@ -61,6 +70,58 @@ RSpec.describe BetterAuth::Rails::ControllerHelpers do
     expect(request.env["better_auth.session"]).to eq(session)
   end
 
+  it "uses the auth instance registered by the Rails mount when resolving real cookies" do
+    BetterAuth::Rails.configure do |config|
+      config.secret = "global-secret-that-is-long-enough-for-tests"
+      config.database = :memory
+      config.base_url = "http://localhost:3000"
+    end
+    custom_auth = BetterAuth.auth(
+      secret: "custom-secret-that-is-long-enough-for-tests",
+      database: :memory,
+      base_url: "http://localhost:3000"
+    )
+    BetterAuth::Rails.register_auth(custom_auth, mount_path: "/api/auth")
+    user = custom_auth.context.internal_adapter.create_user(name: "Ada", email: "ada@example.com")
+    session = custom_auth.context.internal_adapter.create_session(user["id"], false, {"token" => "custom-token"}, true)
+    request = instance_double(
+      "Request",
+      env: {},
+      path: "/posts",
+      request_method: "GET",
+      query_parameters: {},
+      get_header: "#{custom_auth.context.auth_cookies[:session_token].name}=#{signed_cookie("custom-token", custom_auth.options.secret)}"
+    )
+    controller = BetterAuthRailsHelperController.new(request)
+
+    expect(controller.current_user).to include("id" => user.fetch("id"), "email" => "ada@example.com")
+    expect(controller.current_session).to include("token" => session.fetch("token"))
+  end
+
+  it "forwards stale session cookie cleanup headers to the Rails response" do
+    BetterAuth::Rails.configure do |config|
+      config.secret = "test-secret-that-is-long-enough-for-validation"
+      config.database = :memory
+      config.base_url = "http://localhost:3000"
+    end
+    auth = BetterAuth::Rails.auth
+    cookie_name = auth.context.auth_cookies[:session_token].name
+    request = instance_double(
+      "Request",
+      env: {},
+      path: "/posts",
+      request_method: "GET",
+      query_parameters: {},
+      get_header: "#{cookie_name}=#{signed_cookie("missing-token", auth.options.secret)}"
+    )
+    response = BetterAuthRailsFakeResponse.new
+    controller = BetterAuthRailsHelperController.new(request, response: response)
+
+    expect(controller.current_user).to be_nil
+    expect(response.headers.fetch("Set-Cookie")).to include("#{cookie_name}=;")
+    expect(response.headers.fetch("Set-Cookie")).to include("Max-Age=0")
+  end
+
   it "prepares the auth context before resolving a session from cookies" do
     request = instance_double(
       "Request",
@@ -101,6 +162,29 @@ RSpec.describe BetterAuth::Rails::ControllerHelpers do
     expect(context.current_session).to be_nil
   end
 
+  it "clears Better Auth runtime state after helper session lookup" do
+    request = instance_double(
+      "Request",
+      env: {},
+      path: "/posts",
+      request_method: "GET",
+      query_parameters: {},
+      get_header: nil
+    )
+    controller = BetterAuthRailsHelperController.new(request)
+
+    BetterAuth::Rails.configure do |config|
+      config.secret = "test-secret-that-is-long-enough-for-validation"
+      config.database = :memory
+      config.base_url = "http://localhost:3000"
+    end
+    context = BetterAuth::Rails.auth.context
+
+    controller.current_user
+
+    expect(context.send(:request_runtime?)).to be(false)
+  end
+
   it "allows route protection when a current user is present" do
     request = instance_double("Request", env: {"better_auth.session" => {user: {"id" => "user-1"}}})
     controller = BetterAuthRailsHelperController.new(request)
@@ -115,5 +199,10 @@ RSpec.describe BetterAuth::Rails::ControllerHelpers do
 
     expect(controller.require_authentication).to be(false)
     expect(controller.head_status).to eq(:unauthorized)
+  end
+
+  def signed_cookie(value, secret)
+    signature = BetterAuth::Crypto.hmac_signature(value, secret, encoding: :base64url)
+    "#{value}.#{signature}"
   end
 end

@@ -39,7 +39,7 @@ module BetterAuth
 
       def column_line(logical_field, attributes)
         column = attributes[:field_name] || physical_name(logical_field)
-        parts = ["t.#{rails_type(attributes)} :#{column}"]
+        parts = ["t.#{rails_type(logical_field, attributes)} :#{column}"]
         parts << "null: false" if attributes[:required]
         default = default_value(attributes)
         parts << "default: #{default}" unless default.nil?
@@ -79,14 +79,24 @@ module BetterAuth
         end
       end
 
-      def rails_type(attributes)
+      def rails_type(logical_field, attributes)
         case attributes[:type]
         when "boolean" then "boolean"
         when "date" then "datetime"
         when "number" then attributes[:bigint] ? "bigint" : "integer"
         when "json", "string[]", "number[]" then "json"
-        else "string"
+        when "string" then bounded_string?(logical_field, attributes) ? "string" : "text"
+        else "text"
         end
+      end
+
+      def bounded_string?(logical_field, attributes)
+        logical_field.to_s == "id" ||
+          logical_field.to_s.end_with?("Id") ||
+          attributes[:unique] ||
+          attributes[:index] ||
+          attributes[:sortable] ||
+          attributes[:references]
       end
 
       def default_value(attributes)

@@ -21,6 +21,7 @@ module BetterAuth
       def configure
         yield configuration
         @auth = nil
+        @mounted_auth = nil
       end
 
       def auth(overrides = nil)
@@ -28,6 +29,29 @@ module BetterAuth
         return @auth ||= BetterAuth.auth(options) if overrides.nil? || overrides.empty?
 
         BetterAuth.auth(options.merge(overrides))
+      end
+
+      def register_auth(auth, mount_path:)
+        mounted_auth[normalize_mount_path(mount_path)] = auth
+      end
+
+      def auth_for_mount(mount_path = nil)
+        return mounted_auth[normalize_mount_path(mount_path)] if mount_path
+
+        mounted_auth[configuration.base_path] || mounted_auth.values.first || auth
+      end
+
+      private
+
+      def mounted_auth
+        @mounted_auth ||= {}
+      end
+
+      def normalize_mount_path(path)
+        normalized = path.to_s
+        normalized = "/#{normalized}" unless normalized.start_with?("/")
+        normalized = normalized.squeeze("/")
+        (normalized == "/") ? normalized : normalized.delete_suffix("/")
       end
     end
   end

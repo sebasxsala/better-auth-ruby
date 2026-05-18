@@ -78,10 +78,10 @@ BetterAuth::Rails.configure do |config|
     Rails.application.credentials.secret_key_base ||
     Rails.application.secret_key_base
 
-  config.base_url = ENV["BETTER_AUTH_URL"]
+  config.base_url = BetterAuth::Env.get("BETTER_AUTH_URL")
   config.base_path = "/api/auth"
   config.trusted_origins = [
-    ENV["BETTER_AUTH_URL"]
+    BetterAuth::Env.get("BETTER_AUTH_URL")
   ].compact
 
   config.session do |session|
@@ -140,7 +140,7 @@ Core Better Auth also reads `BETTER_AUTH_SECRETS` when `secrets` is not configur
 
 #### Trusted origins
 
-The generated initializer derives `trusted_origins` from `ENV["BETTER_AUTH_URL"]`. If that environment variable is unset, Rails passes an empty list. Browser clients should set trusted origins explicitly in deployment so origin checks and callback URLs do not depend on an empty environment value. See [`host-app-responsibilities.md`](../../.docs/features/host-app-responsibilities.md) for the boundary between Better Auth origin checks, browser CORS headers, and host-app CSRF policy.
+The generated initializer derives `trusted_origins` from `BetterAuth::Env.get("BETTER_AUTH_URL")`. If that environment variable is unset, Rails passes an empty list. Browser clients should set trusted origins explicitly in deployment so origin checks and callback URLs do not depend on an empty environment value. See [`host-app-responsibilities.md`](../../.docs/features/host-app-responsibilities.md) for the boundary between Better Auth origin checks, browser CORS headers, and host-app CSRF policy.
 
 #### Option builder keys
 
@@ -227,7 +227,7 @@ end
 
 ## Development
 
-Full documentation is being adapted in the root [`docs/`](/Users/sebastiansala/projects/better-auth/docs/README.md) app. The Rails guide lives at `docs/content/docs/integrations/rails.mdx`; pages with a Ruby port warning still contain upstream TypeScript examples for reference.
+Full documentation is being adapted in the root `docs/` app. The Rails guide lives at `docs/content/docs/integrations/rails.mdx`; pages with a Ruby port warning still contain upstream TypeScript examples for reference.
 
 ### Setup
 

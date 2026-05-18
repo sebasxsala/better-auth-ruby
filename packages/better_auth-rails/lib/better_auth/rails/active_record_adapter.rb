@@ -103,7 +103,7 @@ module BetterAuth
         klass = Class.new(ApplicationRecord)
         model_namespace.const_set(class_name_for(model), klass)
         klass.table_name = table_for(model) if klass.respond_to?(:table_name=)
-        klass.primary_key = storage_field(model, "id") if klass.respond_to?(:primary_key=)
+        klass.primary_key = storage_field(model, "id") if klass.respond_to?(:primary_key=) && schema_for(model).fetch(:fields).key?("id")
         @models[model] = klass
         define_join_associations(model, klass)
         klass
@@ -228,7 +228,7 @@ module BetterAuth
           end
           output[field] = coerce_value(value, attributes) if value_provided
         end
-        output["id"] = generated_id if action == "create" && !output.key?("id")
+        output["id"] = generated_id if action == "create" && !output.key?("id") && fields.key?("id")
         output
       end
 

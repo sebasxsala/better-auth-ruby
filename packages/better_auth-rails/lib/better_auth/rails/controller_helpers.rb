@@ -26,6 +26,10 @@ module BetterAuth
 
       private
 
+      def better_auth_auth
+        BetterAuth::Rails.auth_for_mount
+      end
+
       def better_auth_session_data
         return request.env["better_auth.session"] if request.env.key?("better_auth.session")
 
@@ -33,7 +37,7 @@ module BetterAuth
       end
 
       def resolve_better_auth_session
-        auth_context = BetterAuth::Rails.auth.context
+        auth_context = better_auth_auth.context
         auth_context.prepare_for_request!(request) if auth_context.respond_to?(:prepare_for_request!)
         context = BetterAuth::Endpoint::Context.new(
           path: request.path,
@@ -46,6 +50,32 @@ module BetterAuth
           request: request
         )
         BetterAuth::Session.find_current(context, disable_refresh: true)
+      ensure
+        copy_better_auth_response_headers(context) if defined?(context) && context
+        auth_context.clear_runtime! if defined?(auth_context) && auth_context&.respond_to?(:clear_runtime!)
+      end
+
+      def copy_better_auth_response_headers(context)
+        return unless respond_to?(:response) && response
+
+        context.response_headers.each do |key, value|
+          write_better_auth_response_header(key, value)
+        end
+      end
+
+      def write_better_auth_response_header(key, value)
+        header_name = canonical_response_header(key)
+        if response.respond_to?(:set_header)
+          response.set_header(header_name, value)
+        elsif response.respond_to?(:headers)
+          response.headers[header_name] = value
+        end
+      end
+
+      def canonical_response_header(key)
+        return "Set-Cookie" if key.to_s.downcase == "set-cookie"
+
+        key.to_s.split("-").map(&:capitalize).join("-")
       end
     end
   end

@@ -18,6 +18,32 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("add_foreign_key :sessions, :users, column: :user_id, on_delete: :cascade")
   end
 
+  it "renders long unindexed string fields as text while keeping indexed strings bounded" do
+    migration = described_class.render(config)
+
+    expect(migration).to include("t.text :access_token")
+    expect(migration).to include("t.text :refresh_token")
+    expect(migration).to include("t.text :id_token")
+    expect(migration).to include("t.text :value, null: false")
+    expect(migration).to include("t.string :token, null: false")
+    expect(migration).to include("t.string :user_id, null: false")
+  end
+
+  it "renders database rate-limit tables without synthetic primary keys" do
+    rate_limit_config = BetterAuth::Configuration.new(
+      secret: "test-secret-that-is-long-enough-for-validation",
+      database: :memory,
+      rate_limit: {storage: "database"}
+    )
+
+    migration = described_class.render(rate_limit_config)
+
+    expect(migration).to include("create_table :rate_limits, id: false")
+    expect(migration).to include("t.string :key, null: false")
+    expect(migration).to include("add_index :rate_limits, :key, unique: true")
+    expect(migration).not_to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
+  end
+
   it "renders plugin tables and maps logical foreign-key targets to physical Rails tables" do
     plugin = BetterAuth::Plugin.new(
       id: "audit",

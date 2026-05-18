@@ -271,6 +271,25 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     expect(user.fetch("id")).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
   end
 
+  it "does not inject generated IDs for schema models without an id field" do
+    rate_limit_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      rate_limit: {storage: "database"}
+    )
+    rate_limit_adapter = described_class.new(rate_limit_config, connection: connection)
+    rate_limit_adapter.send(:model_class, "rateLimit").relation = BetterAuthRailsFakeRelation.new([])
+
+    record = rate_limit_adapter.create(
+      model: "rateLimit",
+      data: {key: "127.0.0.1:/sign-in", count: 1, lastRequest: 1_715_000_000_000}
+    )
+    created = rate_limit_adapter.send(:model_class, "rateLimit").created_records.first
+
+    expect(created.attributes).not_to have_key("id")
+    expect(record).to include("key" => "127.0.0.1:/sign-in", "count" => 1, "lastRequest" => 1_715_000_000_000)
+  end
+
   it "wraps work in an ActiveRecord transaction" do
     expect(fake_connection).to receive(:transaction).and_yield
 

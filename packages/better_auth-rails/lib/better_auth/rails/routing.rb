@@ -6,6 +6,7 @@ module BetterAuth
       def better_auth(auth: nil, at: BetterAuth::Configuration::DEFAULT_BASE_PATH)
         mount_path = normalize_better_auth_mount_path(at)
         auth ||= BetterAuth::Rails.auth(base_path: mount_path)
+        BetterAuth::Rails.register_auth(auth, mount_path: mount_path)
         mount BetterAuth::Rails::MountedApp.new(auth, mount_path: mount_path), at: mount_path
       end
 

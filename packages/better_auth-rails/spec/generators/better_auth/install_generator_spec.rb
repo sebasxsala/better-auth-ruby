@@ -44,4 +44,12 @@ RSpec.describe BetterAuth::Generators::InstallGenerator do
 
     expect(File.read(initializer)).to eq("# existing\n")
   end
+
+  it "keeps the README initializer snippet aligned with the generated template" do
+    readme = File.read(File.expand_path("../../../README.md", __dir__))
+
+    expect(readme).to include('BetterAuth::Env.get("BETTER_AUTH_URL")')
+    expect(readme).not_to include('ENV["BETTER_AUTH_URL"]')
+    expect(readme).not_to include("/Users/")
+  end
 end
