@@ -1250,9 +1250,10 @@ class BetterAuthPluginsAPIKeyTest < Minitest::Test
 
     assert_equal true, result[:valid]
     assert_equal 1, result[:key][:remaining]
-    assert_equal 2, deferred.length, "expected upstream parity: usage update + delete-all-expired both scheduled"
+    assert_equal 1, deferred.length, "expected only incidental cleanup to be scheduled; usage accounting must be immediate"
     stored_before_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
-    assert_nil stored_before_task["lastRequest"]
+    assert stored_before_task["lastRequest"]
+    assert_equal 1, stored_before_task["remaining"]
     deferred.each(&:call)
     stored_after_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
     assert stored_after_task["lastRequest"]

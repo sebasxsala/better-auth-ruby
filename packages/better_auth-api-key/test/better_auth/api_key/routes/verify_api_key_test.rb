@@ -58,4 +58,67 @@ class BetterAuthAPIKeyVerifyRouteTest < Minitest::Test
     assert_equal false, invalid[:valid]
     assert_equal "KEY_NOT_FOUND", invalid[:error][:code]
   end
+
+  def test_verify_route_accepts_non_default_config_key_without_config_id
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12, rate_limit: {enabled: false}},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12, rate_limit: {enabled: false}}
+    ])
+    cookie = sign_up_cookie(auth, email: "verify-route-multi-config-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "service-key"})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, result[:valid]
+    assert_equal "service", result[:key][:configId]
+    assert_equal "service-key", result[:key][:name]
+    refute result[:key].key?(:key)
+  end
+
+  def test_verify_route_rejects_explicit_wrong_config_id
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12, rate_limit: {enabled: false}},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12, rate_limit: {enabled: false}}
+    ])
+    cookie = sign_up_cookie(auth, email: "verify-route-wrong-config-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, configId: "service"})
+
+    result = auth.api.verify_api_key(body: {key: created[:key], configId: "default"})
+
+    assert_equal false, result[:valid]
+    assert_equal "INVALID_API_KEY", result[:error][:code]
+    assert_nil result[:key]
+  end
+
+  def test_verify_route_uses_matched_config_validator_when_config_id_is_omitted
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12, rate_limit: {enabled: false}, custom_api_key_validator: ->(*) { false }},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12, rate_limit: {enabled: false}, custom_api_key_validator: ->(*) { true }}
+    ])
+    cookie = sign_up_cookie(auth, email: "verify-route-validator-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, configId: "service"})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal true, result[:valid]
+    assert_equal "service", result[:key][:configId]
+  end
+
+  def test_verify_route_rejects_matched_config_validator_failure_when_config_id_is_omitted
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12, rate_limit: {enabled: false}, custom_api_key_validator: ->(*) { true }},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12, rate_limit: {enabled: false}, custom_api_key_validator: ->(*) { false }}
+    ])
+    cookie = sign_up_cookie(auth, email: "verify-route-validator-failure-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    created = auth.api.create_api_key(body: {userId: user_id, configId: "service"})
+
+    result = auth.api.verify_api_key(body: {key: created[:key]})
+
+    assert_equal false, result[:valid]
+    assert_equal "KEY_NOT_FOUND", result[:error][:code]
+  end
 end

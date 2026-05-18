@@ -13,6 +13,9 @@ module BetterAuth
             body = BetterAuth::Plugins.api_key_normalize_body(ctx.body)
             resolved_config = BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, body[:config_id])
             session = BetterAuth::Routes.current_session(ctx, allow_nil: true)
+            if !session && BetterAuth::Plugins.api_key_auth_required?(ctx)
+              raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"])
+            end
             reference_id = BetterAuth::Plugins.api_key_create_reference_id!(ctx, body, session, resolved_config)
 
             BetterAuth::Plugins.api_key_validate_create_update!(body, resolved_config, create: true, client: !ctx.headers.empty?)

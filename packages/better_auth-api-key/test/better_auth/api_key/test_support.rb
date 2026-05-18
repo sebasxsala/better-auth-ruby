@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "json"
+require "rack/mock_request"
+require "stringio"
 require_relative "../../test_helper"
 
 module APIKeyTestSupport
@@ -25,6 +28,34 @@ module APIKeyTestSupport
       as_response: true
     )
     headers.fetch("set-cookie").to_s.lines.map { |line| line.split(";").first }.join("; ")
+  end
+
+  def rack_json_response(auth, method, path, body: nil, cookie: nil)
+    payload = body ? JSON.generate(body) : ""
+    env = {
+      "CONTENT_TYPE" => "application/json",
+      "CONTENT_LENGTH" => payload.bytesize.to_s,
+      "HTTP_ORIGIN" => "http://localhost:3000",
+      :input => payload
+    }
+    env["HTTP_COOKIE"] = cookie if cookie
+    response = Rack::MockRequest.new(auth).request(method, "/api/auth#{path}", env)
+    [response.status, JSON.parse(response.body)]
+  end
+
+  def request_mode_api_response(auth, endpoint, body:, cookie: nil)
+    request = Rack::Request.new({
+      "REQUEST_METHOD" => "POST",
+      "PATH_INFO" => "/api/auth",
+      "QUERY_STRING" => "",
+      "SERVER_NAME" => "localhost",
+      "SERVER_PORT" => "3000",
+      "rack.url_scheme" => "http",
+      "rack.input" => StringIO.new(""),
+      "HTTP_COOKIE" => cookie
+    }.compact)
+    status, _headers, response_body = auth.api.public_send(endpoint, request: request, body: body)
+    [status, JSON.parse(response_body.join)]
   end
 
   class MemoryStorage

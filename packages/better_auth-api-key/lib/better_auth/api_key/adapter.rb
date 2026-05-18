@@ -84,8 +84,10 @@ module BetterAuth
           updated = nil
           if config[:storage] == "database" || config[:fallback_to_database]
             updated = ctx.context.adapter.update(model: BetterAuth::Plugins::API_KEY_TABLE_NAME, where: [{field: "id", value: record["id"]}], update: update)
+            return nil unless updated
+          else
+            updated = record.merge(update.transform_keys { |key| BetterAuth::Schema.storage_key(key) })
           end
-          updated ||= record.merge(update.transform_keys { |key| BetterAuth::Schema.storage_key(key) })
           set(ctx, updated, config) if config[:storage] == "secondary-storage"
           updated
         end

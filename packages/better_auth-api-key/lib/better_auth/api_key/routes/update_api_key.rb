@@ -13,6 +13,9 @@ module BetterAuth
             body = BetterAuth::Plugins.api_key_normalize_body(ctx.body)
             resolved_config = BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, body[:config_id])
             session = BetterAuth::Routes.current_session(ctx, allow_nil: true)
+            if !session && BetterAuth::Plugins.api_key_auth_required?(ctx)
+              raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"])
+            end
             user_id = session&.dig(:user, "id") || body[:user_id]
             raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["UNAUTHORIZED_SESSION"]) unless user_id
             if session && body[:user_id] && body[:user_id] != session[:user]["id"]
@@ -34,6 +37,13 @@ module BetterAuth
             raise BetterAuth::APIError.new("BAD_REQUEST", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["NO_VALUES_TO_UPDATE"]) if update.empty?
 
             updated = BetterAuth::Plugins.api_key_update_record(ctx, record, update.merge(updatedAt: Time.now), record_config)
+            unless updated
+              raise BetterAuth::APIError.new(
+                "INTERNAL_SERVER_ERROR",
+                message: BetterAuth::Plugins::API_KEY_ERROR_CODES["FAILED_TO_UPDATE_API_KEY"],
+                code: "FAILED_TO_UPDATE_API_KEY"
+              )
+            end
             updated = BetterAuth::Plugins.api_key_migrate_legacy_metadata(ctx, updated, record_config)
             BetterAuth::Plugins.api_key_delete_expired(ctx.context, record_config)
             ctx.json(BetterAuth::Plugins.api_key_public(updated, include_key_field: false))

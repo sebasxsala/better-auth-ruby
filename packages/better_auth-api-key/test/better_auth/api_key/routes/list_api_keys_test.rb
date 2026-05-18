@@ -90,4 +90,72 @@ class BetterAuthAPIKeyListRouteTest < Minitest::Test
     stored_after_task = auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: created[:id]}])
     assert_equal({"plan" => "legacy"}, JSON.parse(stored_after_task.fetch("metadata")))
   end
+
+  def test_list_route_does_not_duplicate_database_scans_for_equivalent_configurations
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12},
+      {config_id: "internal", default_prefix: "int_", default_key_length: 12}
+    ])
+    cookie = sign_up_cookie(auth, email: "list-route-storage-group-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "service"})
+    auth.api.create_api_key(body: {userId: user_id, configId: "internal", name: "internal"})
+    find_many_calls = []
+    original_find_many = auth.context.adapter.method(:find_many)
+    auth.context.adapter.define_singleton_method(:find_many) do |**kwargs|
+      find_many_calls << kwargs if kwargs[:model].to_s == "apikey"
+      original_find_many.call(**kwargs)
+    end
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie})
+
+    assert_equal 2, listed[:total]
+    assert_operator find_many_calls.length, :<=, 2
+  end
+
+  def test_list_route_pushes_pagination_to_database_for_explicit_non_default_config
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12}
+    ])
+    cookie = sign_up_cookie(auth, email: "list-route-db-pagination-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "alpha"})
+    auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "beta"})
+    auth.api.create_api_key(body: {userId: user_id, configId: "default", name: "default"})
+    find_many_calls = []
+    original_find_many = auth.context.adapter.method(:find_many)
+    auth.context.adapter.define_singleton_method(:find_many) do |**kwargs|
+      find_many_calls << kwargs if kwargs[:model].to_s == "apikey"
+      original_find_many.call(**kwargs)
+    end
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {configId: "service", limit: "1", offset: "1", sortBy: "name", sortDirection: "asc"})
+    paginated_call = find_many_calls.find { |call| call[:limit] == 1 && call[:offset] == 1 }
+
+    assert_equal 2, listed[:total]
+    assert_equal ["beta"], listed[:apiKeys].map { |key| key[:name] }
+    refute_nil paginated_call
+    assert_equal({field: "name", direction: "asc"}, paginated_call[:sort_by])
+  end
+
+  def test_list_route_keeps_legacy_user_id_rows_for_explicit_non_default_config
+    auth = build_api_key_auth([
+      {config_id: "default", default_prefix: "def_", default_key_length: 12},
+      {config_id: "service", default_prefix: "svc_", default_key_length: 12}
+    ])
+    cookie = sign_up_cookie(auth, email: "list-route-legacy-user-id-key@example.com")
+    user_id = auth.api.get_session(headers: {"cookie" => cookie})[:user]["id"]
+    auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "modern"})
+    legacy = auth.api.create_api_key(body: {userId: user_id, configId: "service", name: "legacy"})
+    legacy_record = auth.context.adapter.db.fetch("apikey").find { |record| record.fetch("id") == legacy[:id] }
+    legacy_record["userId"] = user_id
+    legacy_record.delete("referenceId")
+
+    listed = auth.api.list_api_keys(headers: {"cookie" => cookie}, query: {configId: "service", sortBy: "name", sortDirection: "asc"})
+
+    assert_equal 2, listed[:total]
+    assert_equal ["legacy", "modern"], listed[:apiKeys].map { |key| key[:name] }
+  end
 end

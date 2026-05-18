@@ -42,7 +42,7 @@ module BetterAuth
 
       @last_expired_check = nil
 
-      def delete_expired(context, config, bypass_last_check: false)
+      def delete_expired(context, config, bypass_last_check: false, raise_on_error: false)
         return unless config[:storage] == "database" || config[:fallback_to_database]
         unless bypass_last_check
           now = Time.now
@@ -59,6 +59,9 @@ module BetterAuth
             {field: "expiresAt", value: nil, operator: "ne"}
           ]
         )
+      rescue => error
+        context.logger.error("[API KEY PLUGIN] Failed to delete expired API keys: #{error.message}") if context.respond_to?(:logger) && context.logger.respond_to?(:error)
+        raise if raise_on_error
       end
 
       def schedule_cleanup(ctx, config)

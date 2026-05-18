@@ -38,7 +38,7 @@ class BetterAuthAPIKeyCreateRouteTest < Minitest::Test
     auth = build_api_key_auth(default_key_length: 12)
     cookie = sign_up_cookie(auth, email: "create-route-server-only-key@example.com")
 
-    %i[permissions refillAmount refillInterval rateLimitMax rateLimitTimeWindow].each do |field|
+    %i[permissions refillAmount refillInterval rateLimitMax rateLimitTimeWindow rateLimitEnabled remaining].each do |field|
       error = assert_raises(BetterAuth::APIError) do
         auth.api.create_api_key(headers: {"cookie" => cookie}, body: {field => 10})
       end
@@ -46,6 +46,27 @@ class BetterAuthAPIKeyCreateRouteTest < Minitest::Test
       assert_equal "BAD_REQUEST", error.status
       assert_equal BetterAuth::APIKey::ERROR_CODES.fetch("SERVER_ONLY_PROPERTY"), error.message
     end
+  end
+
+  def test_create_route_rejects_request_mode_user_id_without_session
+    auth = build_api_key_auth(default_key_length: 12)
+
+    status, body = rack_json_response(auth, "POST", "/api-key/create", body: {userId: "target-user-id"})
+
+    assert_equal 401, status
+    assert_equal BetterAuth::APIKey::ERROR_CODES.fetch("UNAUTHORIZED_SESSION"), body.fetch("message")
+    assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "referenceId", value: "target-user-id"}])
+  end
+
+  def test_create_route_rejects_request_mode_user_id_mismatch_with_session
+    auth = build_api_key_auth(default_key_length: 12)
+    cookie = sign_up_cookie(auth, email: "create-route-user-id-mismatch-key@example.com")
+
+    status, body = request_mode_api_response(auth, :create_api_key, body: {userId: "someone-else"}, cookie: cookie)
+
+    assert_equal 401, status
+    assert_equal BetterAuth::APIKey::ERROR_CODES.fetch("UNAUTHORIZED_SESSION"), body.fetch("message")
+    assert_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "referenceId", value: "someone-else"}])
   end
 
   def test_create_route_respects_nil_expiration_and_refill_without_remaining

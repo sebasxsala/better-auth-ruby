@@ -101,6 +101,23 @@ class BetterAuthAPIKeyRoutesIndexTest < Minitest::Test
     assert_match(/simulated cleanup failure/, errors.first)
   end
 
+  def test_regular_delete_expired_logs_adapter_failure_without_raising
+    errors = []
+    auth = build_api_key_auth(default_key_length: 12)
+    logger = Object.new
+    logger.define_singleton_method(:error) { |message, *| errors << message }
+    auth.context.define_singleton_method(:logger) { logger }
+    auth.context.adapter.define_singleton_method(:delete_many) do |**|
+      raise StandardError, "simulated cleanup failure"
+    end
+    config = BetterAuth::APIKey::Configuration.normalize({})
+
+    BetterAuth::APIKey::Routes.delete_expired(auth.context, config, bypass_last_check: true)
+
+    assert_equal 1, errors.length
+    assert_match(/simulated cleanup failure/, errors.first)
+  end
+
   private
 
   def create_expired_record(auth, key)

@@ -5,6 +5,13 @@ module BetterAuth
     module Validation
       module_function
 
+      USAGE_LOCK_STRIPE_COUNT = 256
+
+      def usage_lock_for(key)
+        @usage_lock_stripes ||= Array.new(USAGE_LOCK_STRIPE_COUNT) { Mutex.new }
+        @usage_lock_stripes[key.hash % USAGE_LOCK_STRIPE_COUNT]
+      end
+
       def validate_create_update!(body, config, create:, client:)
         name = body[:name]
         if create && config[:require_name] && name.to_s.empty?
@@ -68,25 +75,34 @@ module BetterAuth
 
       def validate_api_key!(ctx, key, config, permissions: nil)
         hashed = BetterAuth::APIKey::Keys.hash(key, config)
-        record = BetterAuth::APIKey::Adapter.find_by_hash(ctx, hashed, config)
-        raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_API_KEY"]) unless record
-        unless BetterAuth::APIKey::Routes.config_id_matches?(BetterAuth::APIKey::Types.record_config_id(record), config[:config_id])
-          raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_API_KEY"])
-        end
-        raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED"]) if record["enabled"] == false
-        if record["expiresAt"] && record["expiresAt"] <= Time.now
-          BetterAuth::APIKey::Adapter.schedule_record_delete(ctx, record, config)
-          raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_EXPIRED"])
-        end
-        if record["remaining"].to_i <= 0 && !record["remaining"].nil? && record["refillAmount"].nil?
-          BetterAuth::APIKey::Adapter.schedule_record_delete(ctx, record, config)
-          raise BetterAuth::APIError.new("TOO_MANY_REQUESTS", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["USAGE_EXCEEDED"])
-        end
+        usage_lock_for(hashed).synchronize do
+          record = BetterAuth::APIKey::Adapter.find_by_hash(ctx, hashed, config)
+          raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_API_KEY"]) unless record
+          unless BetterAuth::APIKey::Routes.config_id_matches?(BetterAuth::APIKey::Types.record_config_id(record), config[:config_id])
+            raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["INVALID_API_KEY"])
+          end
+          raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_DISABLED"]) if record["enabled"] == false
+          if record["expiresAt"] && record["expiresAt"] <= Time.now
+            BetterAuth::APIKey::Adapter.schedule_record_delete(ctx, record, config)
+            raise BetterAuth::APIError.new("UNAUTHORIZED", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["KEY_EXPIRED"])
+          end
+          if record["remaining"].to_i <= 0 && !record["remaining"].nil? && record["refillAmount"].nil?
+            BetterAuth::APIKey::Adapter.schedule_record_delete(ctx, record, config)
+            raise BetterAuth::APIError.new("TOO_MANY_REQUESTS", message: BetterAuth::Plugins::API_KEY_ERROR_CODES["USAGE_EXCEEDED"])
+          end
 
-        check_permissions!(record, permissions)
-        update = usage_update(record, config)
-        updated = BetterAuth::APIKey::Adapter.update_record(ctx, record, update, config, defer: true)
-        BetterAuth::APIKey::Adapter.migrate_legacy_metadata(ctx, updated || record.merge(update.transform_keys { |key_name| BetterAuth::Schema.storage_key(key_name) }), config)
+          check_permissions!(record, permissions)
+          update = usage_update(record, config)
+          updated = BetterAuth::APIKey::Adapter.update_record(ctx, record, update, config, defer: false)
+          unless updated
+            raise BetterAuth::APIError.new(
+              "INTERNAL_SERVER_ERROR",
+              message: BetterAuth::Plugins::API_KEY_ERROR_CODES["FAILED_TO_UPDATE_API_KEY"],
+              code: "FAILED_TO_UPDATE_API_KEY"
+            )
+          end
+          BetterAuth::APIKey::Adapter.migrate_legacy_metadata(ctx, updated || record.merge(update.transform_keys { |key_name| BetterAuth::Schema.storage_key(key_name) }), config)
+        end
       end
 
       def usage_update(record, config)
