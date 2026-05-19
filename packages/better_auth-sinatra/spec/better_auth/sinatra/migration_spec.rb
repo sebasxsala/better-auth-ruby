@@ -320,6 +320,25 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     Rake.application = Rake::Application.new
   end
 
+  it "exposes status and doctor Rake tasks" do
+    Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        write_minimal_config
+
+        expect {
+          Rake::Task["better_auth:migrate:status"].invoke
+        }.to raise_error(BetterAuth::Sinatra::Migration::UnsupportedAdapterError, /SQL adapters/)
+
+        expect {
+          Rake::Task["better_auth:doctor"].invoke
+        }.to output(/OK config loaded/).to_stdout
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
   it "raises unsupported dialect errors through the migration generator task" do
     with_env("BETTER_AUTH_DIALECT" => "nonsense", "BETTER_AUTH_CONFIG" => nil, "OPEN_AUTH_CONFIG" => nil) do
       Dir.mktmpdir("better-auth-sinatra-tasks") do |dir|

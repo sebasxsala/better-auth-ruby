@@ -25,8 +25,16 @@ namespace :better_auth do
       BetterAuth::Roda.load_app_config!
       dialect = BetterAuth::Roda::Migration.normalize_dialect(BetterAuth::Env.get("BETTER_AUTH_DIALECT") || BetterAuth::Env.get("BETTER_AUTH_DATABASE_DIALECT") || "postgres")
       config = BetterAuth::Roda.migration_configuration
-      path = BetterAuth::Roda::Migration.generate(config, dialect: dialect)
-      puts "create #{path}"
+      adapter = begin
+        BetterAuth::Roda.auth.context.adapter
+      rescue
+        nil
+      end
+      connection = if adapter&.respond_to?(:connection) && adapter.respond_to?(:dialect) && BetterAuth::Roda::Migration.normalize_dialect(adapter.dialect) == dialect
+        adapter.connection
+      end
+      path = BetterAuth::Roda::Migration.generate(config, dialect: dialect, connection: connection)
+      puts(path ? "create #{path}" : "no migrations needed")
     end
   end
 
@@ -34,6 +42,34 @@ namespace :better_auth do
   task :migrate do
     BetterAuth::Roda.load_app_config!
     BetterAuth::Roda::Migration.migrate(BetterAuth::Roda.auth)
+  end
+
+  namespace :migrate do
+    desc "Print pending Better Auth SQL migration status"
+    task :status do
+      BetterAuth::Roda.load_app_config!
+      auth = BetterAuth::Roda.auth
+      adapter = auth.context.adapter
+      unless adapter.respond_to?(:connection) && adapter.respond_to?(:dialect)
+        raise BetterAuth::Roda::Migration::UnsupportedAdapterError, "Better Auth SQL migrations require core SQL adapters with connection and dialect support"
+      end
+      plan = BetterAuth::Roda::Migration.plan(auth.options, connection: adapter.connection, dialect: adapter.dialect)
+      if plan.empty?
+        puts "No migrations needed."
+      else
+        plan.to_create.each { |change| puts "create table #{change.table_name}" }
+        plan.to_add.each { |change| puts "add #{change.fields.keys.join(", ")} to #{change.table_name}" }
+        plan.to_index.each { |change| puts "create index #{change.name}" }
+        plan.warnings.each { |warning| puts "warning: #{warning}" }
+      end
+    end
+  end
+
+  desc "Check Better Auth configuration and schema health"
+  task :doctor do
+    BetterAuth::Roda.load_app_config!
+    exit_code = BetterAuth::Doctor.print(BetterAuth::Doctor.check(BetterAuth::Roda.migration_configuration), stdout: $stdout, stderr: $stderr)
+    abort if exit_code != 0
   end
 
   desc "Print Better Auth Roda mount information"

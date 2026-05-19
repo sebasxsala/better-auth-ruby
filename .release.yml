@@ -1,8 +1,10 @@
-version: "0.8.0"
+version: "0.9.0"
 
 version_files:
   - packages/better_auth/lib/better_auth/version.rb
+  - packages/better_auth-cli/lib/better_auth/cli/version.rb
   - packages/better_auth-api-key/lib/better_auth/api_key/version.rb
+  - packages/better_auth-grape/lib/better_auth/grape/version.rb
   - packages/better_auth-hanami/lib/better_auth/hanami/version.rb
   - packages/better_auth-mongo-adapter/lib/better_auth/mongo_adapter/version.rb
   - packages/better_auth-mongodb/lib/better_auth/mongodb/version.rb
@@ -19,7 +21,9 @@ version_files:
 
 literal_gemspec_versions:
   - packages/openauth/openauth.gemspec
+  - packages/openauth-cli/openauth-cli.gemspec
   - packages/openauth-api-key/openauth-api-key.gemspec
+  - packages/openauth-grape/openauth-grape.gemspec
   - packages/openauth-hanami/openauth-hanami.gemspec
   - packages/openauth-mongodb/openauth-mongodb.gemspec
   - packages/openauth-oauth-provider/openauth-oauth-provider.gemspec
@@ -36,8 +40,12 @@ literal_gemspec_versions:
 pinned_dependencies:
   packages/openauth/openauth.gemspec:
     - better_auth
+  packages/openauth-cli/openauth-cli.gemspec:
+    - better_auth-cli
   packages/openauth-api-key/openauth-api-key.gemspec:
     - better_auth-api-key
+  packages/openauth-grape/openauth-grape.gemspec:
+    - better_auth-grape
   packages/openauth-hanami/openauth-hanami.gemspec:
     - better_auth-hanami
   packages/openauth-mongodb/openauth-mongodb.gemspec:

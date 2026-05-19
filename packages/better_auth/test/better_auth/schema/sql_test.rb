@@ -61,6 +61,23 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
   end
 
+  def test_mysql_ddl_bounds_string_columns_with_defaults
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, default_value: "member"}
+        }
+      }
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :mysql).join("\n")
+
+    assert_includes sql, "`role` varchar(191) DEFAULT 'member'"
+    refute_includes sql, "`role` text NULL DEFAULT 'member'"
+  end
+
   def test_sqlite_ddl_uses_sqlite_types_constraints_and_indexes
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
 
@@ -109,6 +126,32 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, 'CREATE TABLE IF NOT EXISTS "organization_roles"'
     assert_includes sql, '"active_organization_id" text'
     assert_includes sql, '"active_team_id" text'
+  end
+
+  def test_recommended_lookup_fields_are_indexed_when_tables_are_created
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.organization,
+        BetterAuth::Plugins.two_factor
+      ]
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+
+    assert_includes sql, 'UNIQUE ("email")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_accounts_on_user_id" ON "accounts" ("user_id")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_sessions_on_user_id" ON "sessions" ("user_id")'
+    assert_includes sql, 'UNIQUE ("token")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_verifications_on_identifier" ON "verifications" ("identifier")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_invitations_on_email" ON "invitations" ("email")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_invitations_on_organization_id" ON "invitations" ("organization_id")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_members_on_user_id" ON "members" ("user_id")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_members_on_organization_id" ON "members" ("organization_id")'
+    assert_includes sql, 'UNIQUE ("slug")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_organizations_on_slug" ON "organizations" ("slug")'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_two_factors_on_secret" ON "two_factors" ("secret")'
   end
 
   def test_indexed_plugin_fields_use_create_index_statements

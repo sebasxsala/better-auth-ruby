@@ -181,6 +181,8 @@ Short version:
   Rack mounting, helpers, and SQL migration tasks.
 - [`better_auth-roda`](packages/better_auth-roda/): Roda plugin, Rack mounting,
   helpers, and SQL migration tasks.
+- [`better_auth-cli`](packages/better_auth-cli/): CLI for generating, checking,
+  and applying Better Auth SQL migrations through `better-auth`.
 - [`better_auth-mongodb`](packages/better_auth-mongodb/): MongoDB
   database adapter.
 - [`better_auth-redis-storage`](packages/better_auth-redis-storage/): Redis
@@ -202,6 +204,8 @@ They install and load the matching Better Auth Ruby packages, and their READMEs
 point back to the canonical documentation at https://better-auth-rb.vercel.app/.
 
 - [`openauth`](packages/openauth/): Alias for `better_auth`.
+- [`openauth-cli`](packages/openauth-cli/): Alias CLI package that exposes
+  `openauth`.
 - [`openauth-rails`](packages/openauth-rails/): Alias for `better_auth-rails`.
 - [`openauth-sinatra`](packages/openauth-sinatra/): Alias for `better_auth-sinatra`.
 - [`openauth-hanami`](packages/openauth-hanami/): Alias for `better_auth-hanami`.

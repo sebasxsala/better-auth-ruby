@@ -40,11 +40,15 @@ bin/hanami db migrate
 ```
 
 When you add plugins that introduce schema tables or fields, regenerate both
-the migration and the app query objects before migrating a new app:
+the migration and the app query objects. If the base migration already exists
+and Hanami can connect to the current Sequel database, the migration generator
+creates a new incremental update migration for missing plugin tables, additional
+fields, and indexes:
 
 ```bash
 bundle exec rake better_auth:generate:migration
 bundle exec rake better_auth:generate:relations
+bundle exec rake better_auth:doctor
 ```
 
 ## Configuration

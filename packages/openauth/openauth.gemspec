@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name = "openauth"
-  spec.version = "0.8.0"
+  spec.version = "0.9.0"
   spec.authors = ["Sebastian Sala"]
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
@@ -23,5 +23,5 @@ Gem::Specification.new do |spec|
     ["README.md", "CHANGELOG.md", "LICENSE.md"].select { |file| File.exist?(file) }
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "better_auth", "0.8.0"
+  spec.add_dependency "better_auth", "0.9.0"
 end

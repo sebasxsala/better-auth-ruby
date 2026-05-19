@@ -18,6 +18,7 @@ coverage/
 # Ignore temp files
 tmp/
 *.log
+*.gem
 
 # Ignore example app local/runtime artifacts
 examples/*/.env

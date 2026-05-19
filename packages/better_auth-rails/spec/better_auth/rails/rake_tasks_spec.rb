@@ -21,4 +21,8 @@ RSpec.describe "BetterAuth Rails rake tasks" do
   it "loads the Rails environment before generating migrations" do
     expect(Rake::Task["better_auth:generate:migration"].prerequisites).to include("environment")
   end
+
+  it "loads the Rails environment before running doctor" do
+    expect(Rake::Task["better_auth:doctor"].prerequisites).to include("environment")
+  end
 end

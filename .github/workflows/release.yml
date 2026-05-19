@@ -4,10 +4,12 @@ on:
   push:
     tags:
       - 'better_auth-v*'
+      - 'better_auth-cli-v*'
       - 'better_auth-rails-v*'
       - 'better_auth-passkey-v*'
       - 'better_auth-sinatra-v*'
       - 'better_auth-hanami-v*'
+      - 'better_auth-grape-v*'
       - 'better_auth-roda-v*'
       - 'better_auth-api-key-v*'
       - 'better_auth-oauth-provider-v*'
@@ -18,6 +20,7 @@ on:
       - 'better_auth-sso-v*'
       - 'better_auth-stripe-v*'
       - 'better_auth-telemetry-v*'
+      - 'openauth-cli-v*'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -55,10 +58,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       core_version: ${{ steps.detect.outputs.core_version }}
+      cli_version: ${{ steps.detect.outputs.cli_version }}
+      openauth_cli_version: ${{ steps.detect.outputs.openauth_cli_version }}
       rails_version: ${{ steps.detect.outputs.rails_version }}
       passkey_version: ${{ steps.detect.outputs.passkey_version }}
       sinatra_version: ${{ steps.detect.outputs.sinatra_version }}
       hanami_version: ${{ steps.detect.outputs.hanami_version }}
+      grape_version: ${{ steps.detect.outputs.grape_version }}
       roda_version: ${{ steps.detect.outputs.roda_version }}
       api_key_version: ${{ steps.detect.outputs.api_key_version }}
       oauth_provider_version: ${{ steps.detect.outputs.oauth_provider_version }}
@@ -72,10 +78,13 @@ jobs:
       tag_version: ${{ steps.detect.outputs.tag_version }}
       target_package: ${{ steps.detect.outputs.target_package }}
       core_releases: ${{ steps.detect.outputs.core_releases }}
+      cli_releases: ${{ steps.detect.outputs.cli_releases }}
+      openauth_cli_releases: ${{ steps.detect.outputs.openauth_cli_releases }}
       rails_releases: ${{ steps.detect.outputs.rails_releases }}
       passkey_releases: ${{ steps.detect.outputs.passkey_releases }}
       sinatra_releases: ${{ steps.detect.outputs.sinatra_releases }}
       hanami_releases: ${{ steps.detect.outputs.hanami_releases }}
+      grape_releases: ${{ steps.detect.outputs.grape_releases }}
       roda_releases: ${{ steps.detect.outputs.roda_releases }}
       api_key_releases: ${{ steps.detect.outputs.api_key_releases }}
       oauth_provider_releases: ${{ steps.detect.outputs.oauth_provider_releases }}
@@ -102,10 +111,13 @@ jobs:
           set -euo pipefail
 
           core_file="packages/better_auth/lib/better_auth/version.rb"
+          cli_file="packages/better_auth-cli/lib/better_auth/cli/version.rb"
+          openauth_cli_gemspec="packages/openauth-cli/openauth-cli.gemspec"
           rails_file="packages/better_auth-rails/lib/better_auth/rails/version.rb"
           passkey_file="packages/better_auth-passkey/lib/better_auth/passkey/version.rb"
           sinatra_file="packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb"
           hanami_file="packages/better_auth-hanami/lib/better_auth/hanami/version.rb"
+          grape_file="packages/better_auth-grape/lib/better_auth/grape/version.rb"
           roda_file="packages/better_auth-roda/lib/better_auth/roda/version.rb"
           api_key_file="packages/better_auth-api-key/lib/better_auth/api_key/version.rb"
           oauth_provider_file="packages/better_auth-oauth-provider/lib/better_auth/oauth_provider/version.rb"
@@ -118,10 +130,13 @@ jobs:
           telemetry_file="packages/better_auth-telemetry/lib/better_auth/telemetry/version.rb"
 
           core_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$core_file")
+          cli_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$cli_file")
+          openauth_cli_version=$(ruby -e 'spec = Gem::Specification.load(ARGV.fetch(0)); print spec.version' "$openauth_cli_gemspec")
           rails_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$rails_file")
           passkey_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$passkey_file")
           sinatra_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$sinatra_file")
           hanami_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$hanami_file")
+          grape_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$grape_file")
           roda_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$roda_file")
           api_key_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$api_key_file")
           oauth_provider_version=$(ruby -e 'print File.read(ARGV[0])[/VERSION\s*=\s*"([^"]+)"/, 1]' "$oauth_provider_file")
@@ -137,10 +152,13 @@ jobs:
           tag_version=""
           target_package=""
           core_releases=false
+          cli_releases=false
+          openauth_cli_releases=false
           rails_releases=false
           passkey_releases=false
           sinatra_releases=false
           hanami_releases=false
+          grape_releases=false
           roda_releases=false
           api_key_releases=false
           oauth_provider_releases=false
@@ -163,6 +181,12 @@ jobs:
                 tag_version="${tag_name#better_auth-v}"
                 expected_version="$core_version"
                 core_releases=true
+                ;;
+              better_auth-cli-v*)
+                target_package="better_auth-cli"
+                tag_version="${tag_name#better_auth-cli-v}"
+                expected_version="$cli_version"
+                cli_releases=true
                 ;;
               better_auth-rails-v*)
                 target_package="better_auth-rails"
@@ -187,6 +211,12 @@ jobs:
                 tag_version="${tag_name#better_auth-hanami-v}"
                 expected_version="$hanami_version"
                 hanami_releases=true
+                ;;
+              better_auth-grape-v*)
+                target_package="better_auth-grape"
+                tag_version="${tag_name#better_auth-grape-v}"
+                expected_version="$grape_version"
+                grape_releases=true
                 ;;
               better_auth-roda-v*)
                 target_package="better_auth-roda"
@@ -248,8 +278,14 @@ jobs:
                 expected_version="$telemetry_version"
                 telemetry_releases=true
                 ;;
+              openauth-cli-v*)
+                target_package="openauth-cli"
+                tag_version="${tag_name#openauth-cli-v}"
+                expected_version="$openauth_cli_version"
+                openauth_cli_releases=true
+                ;;
               *)
-                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-passkey-vX.Y.Z, better_auth-sinatra-vX.Y.Z, better_auth-hanami-vX.Y.Z, better_auth-roda-vX.Y.Z, better_auth-api-key-vX.Y.Z, better_auth-oauth-provider-vX.Y.Z, better_auth-redis-storage-vX.Y.Z, better_auth-mongodb-vX.Y.Z, better_auth-mongo-adapter-vX.Y.Z, better_auth-scim-vX.Y.Z, better_auth-sso-vX.Y.Z, better_auth-stripe-vX.Y.Z, or better_auth-telemetry-vX.Y.Z."
+                echo "::error ::Release tags must use a package prefix: better_auth-vX.Y.Z, better_auth-cli-vX.Y.Z, better_auth-rails-vX.Y.Z, better_auth-passkey-vX.Y.Z, better_auth-sinatra-vX.Y.Z, better_auth-hanami-vX.Y.Z, better_auth-grape-vX.Y.Z, better_auth-roda-vX.Y.Z, better_auth-api-key-vX.Y.Z, better_auth-oauth-provider-vX.Y.Z, better_auth-redis-storage-vX.Y.Z, better_auth-mongodb-vX.Y.Z, better_auth-mongo-adapter-vX.Y.Z, better_auth-scim-vX.Y.Z, better_auth-sso-vX.Y.Z, better_auth-stripe-vX.Y.Z, better_auth-telemetry-vX.Y.Z, or openauth-cli-vX.Y.Z."
                 exit 1
                 ;;
             esac
@@ -296,10 +332,13 @@ jobs:
           fi
 
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
+          echo "cli_version=$cli_version" >> "$GITHUB_OUTPUT"
+          echo "openauth_cli_version=$openauth_cli_version" >> "$GITHUB_OUTPUT"
           echo "rails_version=$rails_version" >> "$GITHUB_OUTPUT"
           echo "passkey_version=$passkey_version" >> "$GITHUB_OUTPUT"
           echo "sinatra_version=$sinatra_version" >> "$GITHUB_OUTPUT"
           echo "hanami_version=$hanami_version" >> "$GITHUB_OUTPUT"
+          echo "grape_version=$grape_version" >> "$GITHUB_OUTPUT"
           echo "roda_version=$roda_version" >> "$GITHUB_OUTPUT"
           echo "api_key_version=$api_key_version" >> "$GITHUB_OUTPUT"
           echo "oauth_provider_version=$oauth_provider_version" >> "$GITHUB_OUTPUT"
@@ -313,10 +352,13 @@ jobs:
           echo "tag_version=$tag_version" >> "$GITHUB_OUTPUT"
           echo "target_package=$target_package" >> "$GITHUB_OUTPUT"
           echo "core_releases=$core_releases" >> "$GITHUB_OUTPUT"
+          echo "cli_releases=$cli_releases" >> "$GITHUB_OUTPUT"
+          echo "openauth_cli_releases=$openauth_cli_releases" >> "$GITHUB_OUTPUT"
           echo "rails_releases=$rails_releases" >> "$GITHUB_OUTPUT"
           echo "passkey_releases=$passkey_releases" >> "$GITHUB_OUTPUT"
           echo "sinatra_releases=$sinatra_releases" >> "$GITHUB_OUTPUT"
           echo "hanami_releases=$hanami_releases" >> "$GITHUB_OUTPUT"
+          echo "grape_releases=$grape_releases" >> "$GITHUB_OUTPUT"
           echo "roda_releases=$roda_releases" >> "$GITHUB_OUTPUT"
           echo "api_key_releases=$api_key_releases" >> "$GITHUB_OUTPUT"
           echo "oauth_provider_releases=$oauth_provider_releases" >> "$GITHUB_OUTPUT"
@@ -332,10 +374,13 @@ jobs:
           echo "dry_run=$DRY_RUN_INPUT" >> "$GITHUB_OUTPUT"
 
           echo "core_version=$core_version"
+          echo "cli_version=$cli_version"
+          echo "openauth_cli_version=$openauth_cli_version"
           echo "rails_version=$rails_version"
           echo "passkey_version=$passkey_version"
           echo "sinatra_version=$sinatra_version"
           echo "hanami_version=$hanami_version"
+          echo "grape_version=$grape_version"
           echo "roda_version=$roda_version"
           echo "api_key_version=$api_key_version"
           echo "oauth_provider_version=$oauth_provider_version"
@@ -349,10 +394,13 @@ jobs:
           echo "tag_version=${tag_version:-manual-dry-run}"
           echo "target_package=${target_package:-manual-dry-run}"
           echo "core_releases=$core_releases"
+          echo "cli_releases=$cli_releases"
+          echo "openauth_cli_releases=$openauth_cli_releases"
           echo "rails_releases=$rails_releases"
           echo "passkey_releases=$passkey_releases"
           echo "sinatra_releases=$sinatra_releases"
           echo "hanami_releases=$hanami_releases"
+          echo "grape_releases=$grape_releases"
           echo "api_key_releases=$api_key_releases"
           echo "oauth_provider_releases=$oauth_provider_releases"
           echo "redis_storage_releases=$redis_storage_releases"
@@ -447,6 +495,52 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-passkey
+        run: bundle exec rake test
+
+  test-cli:
+    name: Test better_auth-cli
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.cli_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-cli
+
+      - name: Run linter
+        working-directory: packages/better_auth-cli
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-cli
+        run: bundle exec rake test
+
+  test-openauth-cli:
+    name: Test openauth-cli
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.openauth_cli_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/openauth-cli
+
+      - name: Run linter
+        working-directory: packages/openauth-cli
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/openauth-cli
         run: bundle exec rake test
 
   test-rails:
@@ -553,6 +647,29 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-hanami
+        run: bundle exec rspec
+
+  test-grape:
+    name: Test better_auth-grape (Grape Adapter)
+    needs: [prepare-release]
+    if: needs.prepare-release.outputs.grape_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-grape
+
+      - name: Run linter
+        working-directory: packages/better_auth-grape
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-grape
         run: bundle exec rspec
 
   test-roda:
@@ -975,6 +1092,102 @@ jobs:
 
           gem push better_auth-passkey-*.gem
 
+  publish-cli:
+    name: Build and publish better_auth-cli
+    needs: [prepare-release, verify-ci, test-cli]
+    if: needs.prepare-release.outputs.cli_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-cli
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.cli_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-cli gem
+        working-directory: packages/better_auth-cli
+        run: |
+          set -euo pipefail
+          rm -f better_auth-cli-*.gem
+          gem build better_auth-cli.gemspec
+
+      - name: Publish better_auth-cli gem
+        if: needs.prepare-release.outputs.cli_releases == 'true'
+        working-directory: packages/better_auth-cli
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.cli_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-cli"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-cli"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-cli $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-cli-*.gem
+
+  publish-openauth-cli:
+    name: Build and publish openauth-cli
+    needs: [prepare-release, verify-ci, test-openauth-cli]
+    if: needs.prepare-release.outputs.openauth_cli_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/openauth-cli
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.openauth_cli_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build openauth-cli gem
+        working-directory: packages/openauth-cli
+        run: |
+          set -euo pipefail
+          rm -f openauth-cli-*.gem
+          gem build openauth-cli.gemspec
+
+      - name: Publish openauth-cli gem
+        if: needs.prepare-release.outputs.openauth_cli_releases == 'true'
+        working-directory: packages/openauth-cli
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.openauth_cli_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for openauth-cli"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "openauth-cli"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "openauth-cli $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push openauth-cli-*.gem
+
   publish-rails:
     name: Build and publish better_auth-rails
     needs: [prepare-release, verify-ci, test-rails]
@@ -1145,6 +1358,54 @@ jobs:
           fi
 
           gem push better_auth-hanami-*.gem
+
+  publish-grape:
+    name: Build and publish better_auth-grape
+    needs: [prepare-release, verify-ci, test-grape]
+    if: needs.prepare-release.outputs.grape_releases == 'true' || needs.prepare-release.outputs.dry_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-grape
+
+      - name: Configure RubyGems credentials
+        if: needs.prepare-release.outputs.grape_releases == 'true' && needs.prepare-release.outputs.dry_run != 'true'
+        uses: rubygems/configure-rubygems-credentials@v1.0.0
+
+      - name: Build better_auth-grape gem
+        working-directory: packages/better_auth-grape
+        run: |
+          set -euo pipefail
+          rm -f better_auth-grape-*.gem
+          gem build better_auth-grape.gemspec
+
+      - name: Publish better_auth-grape gem
+        if: needs.prepare-release.outputs.grape_releases == 'true'
+        working-directory: packages/better_auth-grape
+        env:
+          TARGET_VERSION: ${{ needs.prepare-release.outputs.grape_version }}
+          DRY_RUN: ${{ needs.prepare-release.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled, skipping gem push for better_auth-grape"
+            exit 0
+          fi
+
+          already_exists=$(ruby -rjson -ropen-uri -e 'gem_name = "better_auth-grape"; version = ENV.fetch("TARGET_VERSION"); begin; body = URI.open("https://rubygems.org/api/v1/versions/#{gem_name}.json").read; versions = JSON.parse(body).map { |v| v["number"] }; print versions.include?(version) ? "true" : "false"; rescue StandardError; print "false"; end')
+
+          if [ "$already_exists" = "true" ]; then
+            echo "better_auth-grape $TARGET_VERSION already exists on RubyGems, skipping push"
+            exit 0
+          fi
+
+          gem push better_auth-grape-*.gem
 
   publish-roda:
     name: Build and publish better_auth-roda
@@ -1651,7 +1912,9 @@ jobs:
 
           packages=(
             "openauth"
+            "openauth-cli"
             "openauth-api-key"
+            "openauth-grape"
             "openauth-hanami"
             "openauth-mongodb"
             "openauth-oauth-provider"
@@ -1710,7 +1973,9 @@ jobs:
 
           packages=(
             "openauth"
+            "openauth-cli"
             "openauth-api-key"
+            "openauth-grape"
             "openauth-hanami"
             "openauth-mongodb"
             "openauth-oauth-provider"
@@ -1756,17 +2021,20 @@ jobs:
 
   create-release:
     name: Create GitHub release
-    needs: [prepare-release, publish-core, publish-passkey, publish-rails, publish-sinatra, publish-hanami, publish-roda, publish-api-key, publish-oauth-provider, publish-redis-storage, publish-mongodb, publish-mongo-adapter, publish-scim, publish-sso, publish-stripe, publish-telemetry]
+    needs: [prepare-release, publish-core, publish-cli, publish-openauth-cli, publish-passkey, publish-rails, publish-sinatra, publish-hanami, publish-grape, publish-roda, publish-api-key, publish-oauth-provider, publish-redis-storage, publish-mongodb, publish-mongo-adapter, publish-scim, publish-sso, publish-stripe, publish-telemetry]
     if: |
       always() &&
       needs.prepare-release.outputs.should_publish == 'true' &&
       needs.prepare-release.outputs.dry_run != 'true' &&
       (
         needs.publish-core.result == 'success' ||
+        needs.publish-cli.result == 'success' ||
+        needs.publish-openauth-cli.result == 'success' ||
         needs.publish-passkey.result == 'success' ||
         needs.publish-rails.result == 'success' ||
         needs.publish-sinatra.result == 'success' ||
         needs.publish-hanami.result == 'success' ||
+        needs.publish-grape.result == 'success' ||
         needs.publish-roda.result == 'success' ||
         needs.publish-api-key.result == 'success' ||
         needs.publish-oauth-provider.result == 'success' ||
@@ -1791,11 +2059,14 @@ jobs:
             ## Published packages
 
             - `better_auth` version `${{ needs.prepare-release.outputs.core_version }}` (released: `${{ needs.prepare-release.outputs.core_releases }}`)
+            - `better_auth-cli` version `${{ needs.prepare-release.outputs.cli_version }}` (released: `${{ needs.prepare-release.outputs.cli_releases }}`)
+            - `openauth-cli` version `${{ needs.prepare-release.outputs.openauth_cli_version }}` (released: `${{ needs.prepare-release.outputs.openauth_cli_releases }}`)
             - `better_auth-passkey` version `${{ needs.prepare-release.outputs.passkey_version }}` (released: `${{ needs.prepare-release.outputs.passkey_releases }}`)
             - `better_auth-rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
             - `better_auth_rails` version `${{ needs.prepare-release.outputs.rails_version }}` (released: `${{ needs.prepare-release.outputs.rails_releases }}`)
             - `better_auth-sinatra` version `${{ needs.prepare-release.outputs.sinatra_version }}` (released: `${{ needs.prepare-release.outputs.sinatra_releases }}`)
             - `better_auth-hanami` version `${{ needs.prepare-release.outputs.hanami_version }}` (released: `${{ needs.prepare-release.outputs.hanami_releases }}`)
+            - `better_auth-grape` version `${{ needs.prepare-release.outputs.grape_version }}` (released: `${{ needs.prepare-release.outputs.grape_releases }}`)
             - `better_auth-roda` version `${{ needs.prepare-release.outputs.roda_version }}` (released: `${{ needs.prepare-release.outputs.roda_releases }}`)
             - `better_auth-api-key` version `${{ needs.prepare-release.outputs.api_key_version }}` (released: `${{ needs.prepare-release.outputs.api_key_releases }}`)
             - `better_auth-oauth-provider` version `${{ needs.prepare-release.outputs.oauth_provider_version }}` (released: `${{ needs.prepare-release.outputs.oauth_provider_releases }}`)

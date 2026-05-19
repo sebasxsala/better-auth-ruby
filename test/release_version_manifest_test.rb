@@ -51,6 +51,32 @@ class ReleaseVersionManifestTest < Minitest::Test
     assert_includes workflow, "\"openauth-telemetry\""
   end
 
+  def test_release_workflow_includes_cli_packages
+    workflow = File.read(File.join(ROOT, ".github/workflows/release.yml"))
+
+    assert_includes workflow, "better_auth-cli-v*"
+    assert_includes workflow, "openauth-cli-v*"
+    assert_includes workflow, "cli_version"
+    assert_includes workflow, "openauth_cli_version"
+    assert_includes workflow, "cli_releases"
+    assert_includes workflow, "openauth_cli_releases"
+    assert_includes workflow, "Test better_auth-cli"
+    assert_includes workflow, "Test openauth-cli"
+    assert_includes workflow, "Build and publish better_auth-cli"
+    assert_includes workflow, "Build and publish openauth-cli"
+  end
+
+  def test_release_workflow_includes_grape_package
+    workflow = File.read(File.join(ROOT, ".github/workflows/release.yml"))
+
+    assert_includes workflow, "better_auth-grape-v*"
+    assert_includes workflow, "grape_version"
+    assert_includes workflow, "grape_releases"
+    assert_includes workflow, "Test better_auth-grape"
+    assert_includes workflow, "Build and publish better_auth-grape"
+    assert_includes workflow, "\"openauth-grape\""
+  end
+
   private
 
   def release_manifest

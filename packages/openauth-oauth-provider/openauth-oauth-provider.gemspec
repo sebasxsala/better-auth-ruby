@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name = "openauth-oauth-provider"
-  spec.version = "0.8.0"
+  spec.version = "0.9.0"
   spec.authors = ["Sebastian Sala"]
   spec.email = ["sebastian.sala.tech@gmail.com"]
 
@@ -16,5 +16,5 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"] = "https://github.com/sebasxsala/better-auth-rb/issues"
   spec.files = Dir.glob("lib/**/*", File::FNM_DOTMATCH).select { |file| File.file?(file) } + ["README.md", "CHANGELOG.md"].select { |file| File.exist?(file) }
   spec.require_paths = ["lib"]
-  spec.add_dependency "better_auth-oauth-provider", "0.8.0"
+  spec.add_dependency "better_auth-oauth-provider", "0.9.0"
 end

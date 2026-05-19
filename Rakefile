@@ -12,6 +12,12 @@ STANDARD_PATHS = [
   "packages/better_auth/Rakefile",
   "packages/better_auth/lib",
   "packages/better_auth/test",
+  "packages/better_auth-cli/Rakefile",
+  "packages/better_auth-cli/lib",
+  "packages/better_auth-cli/test",
+  "packages/openauth-cli/Rakefile",
+  "packages/openauth-cli/lib",
+  "packages/openauth-cli/test",
   "packages/better_auth-redis-storage/Rakefile",
   "packages/better_auth-redis-storage/lib",
   "packages/better_auth-redis-storage/test",
@@ -72,6 +78,16 @@ task :ci do
   puts "\n🧪 Running tests in packages/better_auth..."
   cd "packages/better_auth" do
     sh "BUNDLE_GEMFILE=Gemfile bundle exec rake ci"
+  end
+
+  puts "\n🧪 Running tests in packages/better_auth-cli..."
+  cd "packages/better_auth-cli" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
+  end
+
+  puts "\n🧪 Running tests in packages/openauth-cli..."
+  cd "packages/openauth-cli" do
+    sh "BUNDLE_GEMFILE=Gemfile bundle exec rake"
   end
 
   puts "\n🧪 Running tests in packages/better_auth-redis-storage..."

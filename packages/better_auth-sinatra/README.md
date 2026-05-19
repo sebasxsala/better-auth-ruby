@@ -98,11 +98,15 @@ Available tasks:
 rake better_auth:install
 rake better_auth:generate:migration
 rake better_auth:migrate
+rake better_auth:migrate:status
+rake better_auth:doctor
 rake better_auth:routes
 ```
 
 `better_auth:install` creates `config/better_auth.rb`. SQL migrations are
-generated under `db/better_auth/migrate`.
+generated under `db/better_auth/migrate`. When a SQL adapter is configured,
+generation introspects the current database and emits only missing Better Auth
+tables, columns, and indexes.
 
 Migration and route tasks load Better Auth configuration from
 `config/better_auth.rb` by default. Set `BETTER_AUTH_CONFIG` (or the

@@ -68,4 +68,9 @@ require "better_auth/grape/tasks"
 rake better_auth:install
 BETTER_AUTH_DIALECT=postgres rake better_auth:generate:migration
 rake better_auth:migrate
+rake better_auth:migrate:status
+rake better_auth:doctor
 ```
+
+When a SQL adapter is configured, migration generation introspects the current
+database and emits only missing Better Auth tables, columns, and indexes.

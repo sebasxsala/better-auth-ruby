@@ -63,9 +63,13 @@ To generate only the base migration:
 ```bash
 bin/rails generate better_auth:migration
 bin/rails better_auth:generate:migration
+bin/rails better_auth:doctor
 ```
 
 The generators skip an existing `config/initializers/better_auth.rb` or existing `*_create_better_auth_tables.rb` migration instead of overwriting them.
+When the base migration already exists and Rails can connect to the current
+database, `better_auth:generate:migration` creates a new incremental update
+migration for missing plugin tables, additional fields, and indexes.
 
 ### Configuration
 

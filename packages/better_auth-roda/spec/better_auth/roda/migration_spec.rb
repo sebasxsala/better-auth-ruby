@@ -137,6 +137,25 @@ RSpec.describe BetterAuth::Roda::Migration do
     Rake.application = Rake::Application.new
   end
 
+  it "exposes status and doctor Rake tasks" do
+    Dir.mktmpdir("better-auth-roda-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        write_minimal_config
+
+        expect {
+          Rake::Task["better_auth:migrate:status"].invoke
+        }.to raise_error(BetterAuth::Roda::Migration::UnsupportedAdapterError, /SQL adapters/)
+
+        expect {
+          Rake::Task["better_auth:doctor"].invoke
+        }.to output(/OK config loaded/).to_stdout
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
   it "prints mount and documentation guidance from the routes task" do
     Dir.mktmpdir("better-auth-roda-tasks") do |dir|
       in_directory(dir) do

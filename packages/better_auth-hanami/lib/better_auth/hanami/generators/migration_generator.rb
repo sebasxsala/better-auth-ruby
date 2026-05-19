@@ -15,7 +15,7 @@ module BetterAuth
 
         def run(force: nil)
           force = @force if force.nil?
-          return existing_migration_path if existing_migration_path && !force
+          return incremental_migration_path_if_needed if existing_migration_path && !force
 
           path = existing_migration_path || migration_path
           FileUtils.mkdir_p(File.dirname(path))
@@ -35,8 +35,20 @@ module BetterAuth
           @migration_path ||= File.join(destination_root, "config/db/migrate", "#{timestamp}_create_better_auth_tables.rb")
         end
 
+        def incremental_migration_path_if_needed
+          plan = BetterAuth::Hanami::Migration.plan_pending(generator_config)
+          return existing_migration_path if plan.empty?
+
+          path = File.join(destination_root, "config/db/migrate", "#{timestamp}_update_better_auth_tables.rb")
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, BetterAuth::Hanami::Migration.render_pending(plan))
+          path
+        rescue BetterAuth::SQLMigration::UnsupportedAdapterError
+          existing_migration_path
+        end
+
         def timestamp
-          Time.now.utc.strftime("%Y%m%d%H%M%S")
+          @timestamp ||= Time.now.utc.strftime("%Y%m%d%H%M%S")
         end
 
         def generator_config

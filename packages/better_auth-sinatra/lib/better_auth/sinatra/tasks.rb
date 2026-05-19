@@ -25,8 +25,16 @@ namespace :better_auth do
       BetterAuth::Sinatra.load_app_config!
       dialect = BetterAuth::Sinatra::Migration.normalize_dialect(BetterAuth::Env.get("BETTER_AUTH_DIALECT") || BetterAuth::Env.get("BETTER_AUTH_DATABASE_DIALECT") || "postgres")
       config = BetterAuth::Sinatra.migration_configuration
-      path = BetterAuth::Sinatra::Migration.generate(config, dialect: dialect)
-      puts "create #{path}"
+      adapter = begin
+        BetterAuth::Sinatra.auth.context.adapter
+      rescue
+        nil
+      end
+      connection = if adapter&.respond_to?(:connection) && adapter.respond_to?(:dialect) && BetterAuth::Sinatra::Migration.normalize_dialect(adapter.dialect) == dialect
+        adapter.connection
+      end
+      path = BetterAuth::Sinatra::Migration.generate(config, dialect: dialect, connection: connection)
+      puts(path ? "create #{path}" : "no migrations needed")
     end
   end
 
@@ -34,6 +42,34 @@ namespace :better_auth do
   task :migrate do
     BetterAuth::Sinatra.load_app_config!
     BetterAuth::Sinatra::Migration.migrate(BetterAuth::Sinatra.auth)
+  end
+
+  namespace :migrate do
+    desc "Print pending Better Auth SQL migration status"
+    task :status do
+      BetterAuth::Sinatra.load_app_config!
+      auth = BetterAuth::Sinatra.auth
+      adapter = auth.context.adapter
+      unless adapter.respond_to?(:connection) && adapter.respond_to?(:dialect)
+        raise BetterAuth::Sinatra::Migration::UnsupportedAdapterError, "Better Auth SQL migrations require core SQL adapters with connection and dialect support"
+      end
+      plan = BetterAuth::Sinatra::Migration.plan(auth.options, connection: adapter.connection, dialect: adapter.dialect)
+      if plan.empty?
+        puts "No migrations needed."
+      else
+        plan.to_create.each { |change| puts "create table #{change.table_name}" }
+        plan.to_add.each { |change| puts "add #{change.fields.keys.join(", ")} to #{change.table_name}" }
+        plan.to_index.each { |change| puts "create index #{change.name}" }
+        plan.warnings.each { |warning| puts "warning: #{warning}" }
+      end
+    end
+  end
+
+  desc "Check Better Auth configuration and schema health"
+  task :doctor do
+    BetterAuth::Sinatra.load_app_config!
+    exit_code = BetterAuth::Doctor.print(BetterAuth::Doctor.check(BetterAuth::Sinatra.migration_configuration), stdout: $stdout, stderr: $stderr)
+    abort if exit_code != 0
   end
 
   desc "Print Better Auth Sinatra mount information"

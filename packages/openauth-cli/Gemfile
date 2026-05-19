@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "better_auth", path: "../better_auth"
+gem "better_auth-cli", path: "../better_auth-cli"
+
+gemspec
+
+group :development, :test do
+  gem "standardrb", "~> 1.0"
+end

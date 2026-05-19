@@ -19,8 +19,10 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal "boolean", schema["user"][:fields]["emailVerified"][:type]
     assert_equal false, schema["user"][:fields]["emailVerified"][:input]
     assert_equal true, schema["user"][:fields]["email"][:unique]
+    assert_equal true, schema["account"][:fields]["userId"][:index]
     assert_equal true, schema["session"][:fields]["token"][:unique]
     assert_equal true, schema["session"][:fields]["userId"][:index]
+    assert_equal true, schema["verification"][:fields]["identifier"][:index]
     assert_equal "users", schema["session"][:fields]["userId"][:references][:model]
     assert_equal "email_verified", schema["user"][:fields]["emailVerified"][:field_name]
     assert_equal "created_at", schema["user"][:fields]["createdAt"][:field_name]
@@ -159,6 +161,9 @@ class BetterAuthSchemaTest < Minitest::Test
     assert_equal true, base_schema["member"][:fields]["role"][:sortable]
     assert_equal true, base_schema["organization"][:fields]["slug"][:index]
     assert_equal true, base_schema["invitation"][:fields]["email"][:index]
+    assert_equal true, base_schema["invitation"][:fields]["organizationId"][:index]
+    assert_equal true, base_schema["member"][:fields]["userId"][:index]
+    assert_equal true, base_schema["member"][:fields]["organizationId"][:index]
 
     with_teams = BetterAuth::Configuration.new(
       secret: SECRET,
@@ -169,6 +174,19 @@ class BetterAuthSchemaTest < Minitest::Test
 
     assert full_schema["invitation"][:fields].key?("teamId")
     assert_equal true, full_schema["organizationRole"][:fields]["role"][:index]
+  end
+
+  def test_two_factor_schema_marks_recommended_lookup_fields_as_indexed
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.two_factor]
+    )
+
+    schema = BetterAuth::Schema.auth_tables(config)
+
+    assert_equal true, schema["twoFactor"][:fields]["secret"][:index]
+    assert_equal true, schema["twoFactor"][:fields]["userId"][:index]
   end
 
   def test_plugin_schema_defaults_physical_table_names_to_plural_snake_case

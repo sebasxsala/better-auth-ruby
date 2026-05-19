@@ -2,6 +2,7 @@
 
 require_relative "../../test_helper"
 require "better_auth/sql_migration"
+require "sqlite3"
 
 class BetterAuthMigrationSQLTest < Minitest::Test
   SECRET = "test-secret-that-is-long-enough-for-validation"
@@ -85,6 +86,116 @@ class BetterAuthMigrationSQLTest < Minitest::Test
       assert_equal 1, connection.executed_statements.count("CREATE TABLE users (id text PRIMARY KEY)")
       assert_equal 1, connection.executed_statements.count("CREATE INDEX index_users_on_email ON users (email)")
       assert_equal ["20260427000000_create_better_auth_tables.sql"], connection.applied_versions
+    end
+  end
+
+  def test_plans_all_tables_for_empty_database
+    connection = SQLite3::Database.new(":memory:")
+    connection.results_as_hash = true
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+
+    plan = BetterAuth::SQLMigration.plan(config, connection: connection, dialect: :sqlite)
+
+    assert_equal %w[users sessions accounts verifications], plan.to_create.map(&:table_name)
+    assert_empty plan.to_add
+    assert_empty plan.warnings
+  end
+
+  def test_plans_only_missing_additional_fields_and_indexes_for_existing_tables
+    connection = SQLite3::Database.new(":memory:")
+    connection.results_as_hash = true
+    base_config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    BetterAuth::SQLMigration.execute_sql(
+      connection,
+      BetterAuth::Schema::SQL.create_statements(base_config, dialect: :sqlite).join("\n")
+    )
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, index: true}
+        }
+      }
+    )
+
+    plan = BetterAuth::SQLMigration.plan(config, connection: connection, dialect: :sqlite)
+    sql = BetterAuth::SQLMigration.render_pending(config, connection: connection, dialect: :sqlite, generator: "better_auth-test")
+
+    assert_empty plan.to_create
+    assert_equal ["users"], plan.to_add.map(&:table_name)
+    assert_equal ["role"], plan.to_add.first.fields.keys
+    assert_equal ["index_users_on_role"], plan.to_index.map(&:name)
+    assert_includes sql, 'ALTER TABLE "users" ADD COLUMN "role" text'
+    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_users_on_role" ON "users" ("role")'
+    refute_includes sql, 'CREATE TABLE IF NOT EXISTS "users"'
+  end
+
+  def test_plans_plugin_table_after_initial_core_schema
+    connection = SQLite3::Database.new(":memory:")
+    connection.results_as_hash = true
+    base_config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    BetterAuth::SQLMigration.execute_sql(
+      connection,
+      BetterAuth::Schema::SQL.create_statements(base_config, dialect: :sqlite).join("\n")
+    )
+    plugin = BetterAuth::Plugin.new(
+      id: "api-key-test",
+      schema: {
+        apiKey: {
+          model_name: "api_keys",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
+            key: {type: "string", required: true, unique: true}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+
+    plan = BetterAuth::SQLMigration.plan(config, connection: connection, dialect: :sqlite)
+
+    assert_equal ["api_keys"], plan.to_create.map(&:table_name)
+    assert_empty plan.to_add
+    assert_equal ["index_api_keys_on_user_id"], plan.to_index.map(&:name)
+  end
+
+  def test_warns_on_type_mismatch_without_planning_destructive_alter
+    connection = SQLite3::Database.new(":memory:")
+    connection.results_as_hash = true
+    connection.execute('CREATE TABLE "users" ("id" text PRIMARY KEY, "email" integer);')
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+
+    plan = BetterAuth::SQLMigration.plan(config, connection: connection, dialect: :sqlite)
+
+    assert plan.warnings.any? { |warning| warning.include?("users.email") && warning.include?("string") && warning.include?("integer") }
+    refute plan.to_add.any? { |change| change.table_name == "users" && change.fields.key?("email") }
+  end
+
+  def test_does_not_record_sql_file_migration_when_statement_fails
+    Dir.mktmpdir("better-auth-core-migrate-failure") do |dir|
+      migrations_path = File.join(dir, "db/better_auth/migrate")
+      FileUtils.mkdir_p(migrations_path)
+      File.write(
+        File.join(migrations_path, "20260427000000_create_better_auth_tables.sql"),
+        "CREATE TABLE users (id text PRIMARY KEY);\nBROKEN;\n"
+      )
+      connection = FakeSQLConnection.new
+      def connection.exec(statement)
+        raise "broken migration statement" if statement.include?("BROKEN")
+
+        super
+      end
+      auth = BetterAuth.auth(
+        secret: SECRET,
+        database: ->(options) { FakeSQLAdapter.new(options, connection) }
+      )
+
+      assert_raises(RuntimeError) do
+        BetterAuth::SQLMigration.migrate(auth, migrations_path: migrations_path)
+      end
+      assert_empty connection.applied_versions
     end
   end
 

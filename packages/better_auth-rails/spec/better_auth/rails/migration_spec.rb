@@ -185,4 +185,49 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("t.string :credential_id, null: false")
     expect(migration).to include("add_index :passkeys, :user_id")
   end
+
+  it "renders pending Rails migrations from the shared migration plan" do
+    plugin = BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", references: {model: "user", field: "id"}, index: true},
+            action: {type: "string", required: true, unique: true}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(
+      secret: "test-secret-that-is-long-enough-for-validation",
+      database: :memory,
+      plugins: [plugin],
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, index: true}
+        }
+      }
+    )
+    existing = {
+      "users" => {
+        name: "users",
+        columns: {"id" => "varchar", "email" => "varchar", "name" => "varchar", "email_verified" => "boolean", "image" => "text", "created_at" => "datetime", "updated_at" => "datetime"},
+        indexes: {names: Set.new(["index_users_on_email"]), columns: Set.new(["email"]), unique_columns: Set.new(["email"])}
+      },
+      "sessions" => {name: "sessions", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "accounts" => {name: "accounts", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "verifications" => {name: "verifications", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}}
+    }
+    plan = BetterAuth::SQLMigration.plan_from_existing(plugin_config, existing: existing, dialect: :postgres)
+
+    migration = described_class.render_pending(plan, class_name: "UpdateBetterAuthTables")
+
+    expect(migration).to include("class UpdateBetterAuthTables < ActiveRecord::Migration")
+    expect(migration).to include("create_table :audit_logs, id: false")
+    expect(migration).to include("add_column :users, :role, :string")
+    expect(migration).to include("add_index :users, :role")
+    expect(migration).not_to include("create_table :users")
+  end
 end

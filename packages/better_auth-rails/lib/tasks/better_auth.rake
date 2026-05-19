@@ -14,4 +14,12 @@ namespace :better_auth do
       BetterAuth::Generators::MigrationGenerator.start([])
     end
   end
+
+  desc "Check Better Auth configuration and schema health"
+  task doctor: :environment do
+    options = BetterAuth::Rails.configuration.to_auth_options
+    config = BetterAuth::Configuration.new(options)
+    exit_code = BetterAuth::Doctor.print(BetterAuth::Doctor.check(config), stdout: $stdout, stderr: $stderr)
+    abort if exit_code != 0
+  end
 end

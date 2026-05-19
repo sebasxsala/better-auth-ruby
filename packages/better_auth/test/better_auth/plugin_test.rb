@@ -116,7 +116,7 @@ class BetterAuthPluginTest < Minitest::Test
 
     tables = BetterAuth::Schema.auth_tables(auth.options)
     assert_equal "string", tables["session"][:fields]["activePluginId"][:type]
-    assert_equal "plugin_audit", tables["pluginAudit"][:model_name]
+    assert_equal "plugin_audits", tables["pluginAudit"][:model_name]
     assert_equal "user_id", tables["pluginAudit"][:fields]["userId"][:field_name]
   end
 

@@ -36,6 +36,24 @@ class App < Roda
 end
 ```
 
+## Rake Tasks
+
+```ruby
+require "better_auth/roda/tasks"
+```
+
+```bash
+rake better_auth:install
+rake better_auth:generate:migration
+rake better_auth:migrate
+rake better_auth:migrate:status
+rake better_auth:doctor
+rake better_auth:routes
+```
+
+When a SQL adapter is configured, migration generation introspects the current
+database and emits only missing Better Auth tables, columns, and indexes.
+
 ## Development
 
 ```bash

@@ -12,6 +12,20 @@ module BetterAuth
         statements.concat(tables.flat_map { |_logical_name, table| index_statements(table, dialect) })
       end
 
+      def pending_statements(plan)
+        statements = plan.to_create.map do |change|
+          create_table_statement(change.logical_name, change.table, plan.dialect, plan.tables)
+        end
+        statements.concat(plan.to_add.flat_map do |change|
+          change.fields.map do |logical_field, attributes|
+            add_column_statement(change.table_name, logical_field, attributes, plan.dialect)
+          end
+        end)
+        statements.concat(plan.to_index.map do |change|
+          index_statement(change.table_name, change.field_name, change.name, plan.dialect, unique: change.unique)
+        end)
+      end
+
       def create_table_statement(logical_name, table, dialect, tables = nil)
         table_name = table.fetch(:model_name)
         columns = table.fetch(:fields).map do |logical_field, attributes|
@@ -71,14 +85,24 @@ module BetterAuth
 
           column = attributes[:field_name] || Schema.physical_name(logical_field)
           name = "index_#{table_name}_on_#{column}"
-          case dialect
-          when :postgres, :sqlite
-            %(CREATE INDEX IF NOT EXISTS #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
-          when :mysql
-            %(CREATE INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
-          when :mssql
-            %(IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '#{name.gsub("'", "''")}' AND object_id = OBJECT_ID(N'#{quote(table_name, dialect)}')) CREATE INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
-          end
+          index_statement(table_name, column, name, dialect)
+        end
+      end
+
+      def add_column_statement(table_name, logical_field, attributes, dialect)
+        keyword = (dialect == :mssql) ? "ADD" : "ADD COLUMN"
+        %(ALTER TABLE #{quote(table_name, dialect)} #{keyword} #{column_definition(table_name, logical_field, attributes, dialect)};)
+      end
+
+      def index_statement(table_name, column, name, dialect, unique: false)
+        unique_prefix = unique ? "UNIQUE " : ""
+        case dialect
+        when :postgres, :sqlite
+          %(CREATE #{unique_prefix}INDEX IF NOT EXISTS #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+        when :mysql
+          %(CREATE #{unique_prefix}INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+        when :mssql
+          %(IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '#{name.gsub("'", "''")}' AND object_id = OBJECT_ID(N'#{quote(table_name, dialect)}')) CREATE #{unique_prefix}INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
         end
       end
 
@@ -121,7 +145,7 @@ module BetterAuth
           end
         else
           if dialect == :mysql
-            indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references]
+            indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references] || attributes[:sortable] || attributes.key?(:default_value)
             indexed ? "varchar(191)" : "text"
           elsif dialect == :mssql
             indexed = logical_field == "id" || attributes[:unique] || attributes[:index] || attributes[:references] || attributes[:sortable]

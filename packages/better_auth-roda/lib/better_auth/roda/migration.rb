@@ -16,13 +16,14 @@ module BetterAuth
         BetterAuth::SQLMigration.render(options, dialect: dialect, generator: GENERATOR)
       end
 
-      def generate(options, dialect:, migrations_path: DEFAULT_MIGRATIONS_PATH, timestamp: Time.now.utc.strftime("%Y%m%d%H%M%S"))
+      def generate(options, dialect:, migrations_path: DEFAULT_MIGRATIONS_PATH, timestamp: Time.now.utc.strftime("%Y%m%d%H%M%S"), connection: nil)
         BetterAuth::SQLMigration.generate(
           options,
           dialect: dialect,
           generator: GENERATOR,
           migrations_path: migrations_path,
-          timestamp: timestamp
+          timestamp: timestamp,
+          connection: connection
         )
       end
 

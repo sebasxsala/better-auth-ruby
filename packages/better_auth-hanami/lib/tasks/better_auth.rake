@@ -19,4 +19,11 @@ namespace :better_auth do
       BetterAuth::Hanami::Generators::RelationGenerator.new.run
     end
   end
+
+  desc "Check Better Auth configuration and schema health"
+  task :doctor do
+    config = BetterAuth::Configuration.new(BetterAuth::Hanami.configuration.to_auth_options)
+    exit_code = BetterAuth::Doctor.print(BetterAuth::Doctor.check(config), stdout: $stdout, stderr: $stderr)
+    abort if exit_code != 0
+  end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../spec_helper"
+require "better_auth/sql_migration"
 
 RSpec.describe BetterAuth::Hanami::Migration do
   let(:config) { BetterAuth::Configuration.new(secret: secret, database: :memory) }
@@ -77,6 +78,52 @@ RSpec.describe BetterAuth::Hanami::Migration do
     expect(migration).to include("column :metadata, JSON")
     expect(migration).to include("column :tags, JSON")
     expect(migration).to include("column :scores, JSON")
+  end
+
+  it "renders pending ROM migrations from the shared migration plan" do
+    plugin = BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", references: {model: "user", field: "id"}, index: true},
+            action: {type: "string", required: true, unique: true}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      plugins: [plugin],
+      user: {
+        additional_fields: {
+          role: {type: "string", required: false, index: true}
+        }
+      }
+    )
+    existing = {
+      "users" => {
+        name: "users",
+        columns: {"id" => "varchar", "email" => "varchar", "name" => "varchar", "email_verified" => "boolean", "image" => "text", "created_at" => "datetime", "updated_at" => "datetime"},
+        indexes: {names: Set.new(["index_users_on_email"]), columns: Set.new(["email"]), unique_columns: Set.new(["email"])}
+      },
+      "sessions" => {name: "sessions", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "accounts" => {name: "accounts", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "verifications" => {name: "verifications", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}}
+    }
+    plan = BetterAuth::SQLMigration.plan_from_existing(plugin_config, existing: existing, dialect: :postgres)
+
+    migration = described_class.render_pending(plan)
+
+    expect(migration).to include("ROM::SQL.migration do")
+    expect(migration).to include("create_table :audit_logs do")
+    expect(migration).to include("alter_table :users do")
+    expect(migration).to include("add_column :role, String")
+    expect(migration).to include("add_index :role")
+    expect(migration).not_to include("create_table :users")
   end
 
   def secret
