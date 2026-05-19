@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+# StandardRB Configuration
+# https://github.com/standardrb/standard
+
+ignore:
+  - 'vendor/**/*'
+  - 'node_modules/**/*'
+  - 'tmp/**/*'
+  - 'coverage/**/*'
+  - 'doc/**/*'
+  - 'pkg/**/*'

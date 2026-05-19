@@ -161,6 +161,7 @@ jobs:
   test-cli:
     name: Test better_auth-cli
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -173,15 +174,16 @@ jobs:
 
       - name: Run linter
         working-directory: packages/better_auth-cli
-        run: bundle exec standardrb
+        run: timeout 180s bundle exec standardrb
 
       - name: Run tests
         working-directory: packages/better_auth-cli
-        run: bundle exec rake test
+        run: timeout 180s bundle exec rake test
 
   test-openauth-cli:
     name: Test openauth-cli
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -194,11 +196,11 @@ jobs:
 
       - name: Run linter
         working-directory: packages/openauth-cli
-        run: bundle exec standardrb
+        run: timeout 180s bundle exec standardrb
 
       - name: Run tests
         working-directory: packages/openauth-cli
-        run: bundle exec rake test
+        run: timeout 180s bundle exec rake test
 
   test-api-key:
     name: Test better_auth-api-key (API Key Plugin)
@@ -303,6 +305,7 @@ jobs:
   test-roda:
     name: Test better_auth-roda (Roda Adapter)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -315,11 +318,11 @@ jobs:
 
       - name: Run linter
         working-directory: packages/better_auth-roda
-        run: bundle exec standardrb
+        run: timeout 180s bundle exec standardrb
 
       - name: Run tests
         working-directory: packages/better_auth-roda
-        run: bundle exec rspec
+        run: timeout 180s bundle exec rspec
 
   test-hanami:
     name: Test better_auth-hanami (Hanami Adapter)
@@ -345,6 +348,7 @@ jobs:
   test-grape:
     name: Test better_auth-grape (Grape Adapter)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -357,11 +361,11 @@ jobs:
 
       - name: Run linter
         working-directory: packages/better_auth-grape
-        run: bundle exec standardrb
+        run: timeout 180s bundle exec standardrb
 
       - name: Run tests
         working-directory: packages/better_auth-grape
-        run: bundle exec rspec
+        run: timeout 180s bundle exec rspec
 
   test-oauth-provider:
     name: Test better_auth-oauth-provider (OAuth Provider Plugin)
