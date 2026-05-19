@@ -42,9 +42,15 @@ gem "image_processing", "~> 1.2"
 
 # Better Auth Ruby — local monorepo gems
 gem "better_auth", path: "../../packages/better_auth"
+gem "better_auth-api-key", path: "../../packages/better_auth-api-key"
 gem "better_auth-rails", path: "../../packages/better_auth-rails"
 gem "better_auth-mongodb", path: "../../packages/better_auth-mongodb"
+gem "better_auth-oauth-provider", path: "../../packages/better_auth-oauth-provider"
+gem "better_auth-passkey", path: "../../packages/better_auth-passkey"
 gem "better_auth-redis-storage", path: "../../packages/better_auth-redis-storage"
+gem "better_auth-scim", path: "../../packages/better_auth-scim"
+gem "better_auth-sso", path: "../../packages/better_auth-sso"
+gem "better_auth-stripe", path: "../../packages/better_auth-stripe"
 # Uncomment any additional Better Auth plugins you want to test:
 # gem "better_auth-api-key", path: "../../packages/better_auth-api-key"
 # gem "better_auth-mongodb", path: "../../packages/better_auth-mongodb"

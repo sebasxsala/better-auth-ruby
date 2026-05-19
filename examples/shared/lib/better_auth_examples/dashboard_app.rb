@@ -28,6 +28,20 @@ module BetterAuthExamples
         json_response(registry.explore(settings).merge(settings: settings))
       when ["POST", "/example/database/delete"]
         delete_records(request)
+      when ["GET", "/example/plugins"]
+        settings = Settings.from_request(request)
+        json_response(
+          {
+            plugins: PluginCatalog.metadata_for(registry.auth_for(settings)),
+            deliveries: PluginCatalog.deliveries,
+            excluded: PluginCatalog::EXCLUDED_PLUGIN_IDS
+          }
+        )
+      when ["POST", "/example/plugins/clear-deliveries"]
+        PluginCatalog.clear_deliveries!
+        json_response({ok: true, deliveries: []})
+      when ["GET", "/example/social-providers"]
+        json_response({providers: SocialProviderCatalog.metadata})
       when ["POST", "/example/reset"]
         reset_database(request)
       else
@@ -141,6 +155,7 @@ module BetterAuthExamples
             line-height: 1.45;
           }
           button, input, select { font: inherit; }
+          textarea { width: 100%; min-width: 0; font: inherit; }
           .shell { display: grid; grid-template-columns: 244px minmax(0, 1fr); min-height: 100dvh; }
           .sidebar { border-right: 1px solid var(--line); background: #fff; padding: 18px 12px; position: sticky; top: 0; height: 100dvh; }
           .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.02em; margin: 0 8px 4px; }
@@ -236,6 +251,46 @@ module BetterAuthExamples
           .pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 12px; }
           .pager strong { color: var(--text); font-weight: 600; }
           .empty-state { padding: 42px 20px; text-align: center; color: var(--muted); }
+          .plugins-panel { padding: 0; overflow: hidden; }
+          .plugins-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); background: oklch(0.985 0.004 260); }
+          .plugins-toolbar h2 { margin: 0 0 3px; }
+          .plugins-panel > .notice { margin: 10px 16px 0; }
+          .plugin-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px; border-bottom: 1px solid var(--line); background: oklch(0.975 0.004 260); }
+          .plugin-tab { border: 1px solid transparent; background: transparent; color: #52525b; border-radius: 999px; padding: 7px 10px; cursor: pointer; white-space: nowrap; display: inline-flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; }
+          .plugin-tab:hover { background: oklch(0.94 0.006 260); color: var(--text); }
+          .plugin-tab.active { background: oklch(0.24 0.012 260); color: oklch(0.98 0.004 260); }
+          .plugin-tab-count { opacity: .68; font: 11px var(--mono); }
+          .plugin-sections { display: grid; background: #fff; }
+          .plugin-section { display: grid; gap: 16px; padding: 22px 22px 26px; border-top: 1px solid var(--line); }
+          .plugin-section:first-child { border-top: 0; }
+          .plugin-section-header { display: grid; gap: 12px; }
+          .plugin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+          .plugin-heading h3 { margin: 0; font-size: 22px; line-height: 1.1; letter-spacing: -.035em; }
+          .plugin-summary { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+          .plugin-description { max-width: 74ch; margin: 0; color: #3f3f46; font-size: 15px; line-height: 1.55; }
+          .plugin-details { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font: 12px/1.4 var(--mono); }
+          .plugin-capabilities { margin: 0; padding-left: 18px; color: #52525b; display: grid; gap: 4px; max-width: 76ch; }
+          .endpoint-actions { display: grid; gap: 9px; }
+          .action-group { display: grid; gap: 9px; }
+          .action-group-title { margin: 2px 0 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+          .endpoint-action { border: 1px solid var(--line); border-radius: 8px; background: oklch(0.995 0.002 260); overflow: hidden; }
+          .endpoint-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; }
+          .method-badge { min-width: 52px; text-align: center; border-radius: 6px; padding: 4px 7px; font: 11px var(--mono); color: oklch(0.26 0.012 260); background: oklch(0.93 0.008 260); }
+          .method-badge.post { color: oklch(0.34 0.08 255); background: oklch(0.94 0.028 255); }
+          .method-badge.get { color: oklch(0.34 0.07 155); background: oklch(0.95 0.03 155); }
+          .method-badge.delete { color: oklch(0.42 0.12 28); background: oklch(0.95 0.035 28); }
+          .endpoint-path { overflow-wrap: anywhere; font: 13px/1.35 var(--mono); color: #27272a; }
+          .action-label { display: block; color: #18181b; font-weight: 650; margin-bottom: 2px; font-family: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+          .endpoint-payload { border-top: 1px solid var(--line); padding: 8px 10px 10px; }
+          .endpoint-payload summary { cursor: pointer; color: #52525b; font-size: 12px; margin-bottom: 8px; font-weight: 650; }
+          .endpoint-payload textarea { display: block; min-height: 154px; resize: vertical; font: 12px/1.55 var(--mono); border-radius: 7px; background: oklch(0.985 0.003 260); color: #27272a; border: 1px solid var(--line); padding: 11px 12px; tab-size: 2; }
+          .endpoint-payload textarea:focus { outline: 2px solid oklch(0.72 0.08 255 / .45); outline-offset: 1px; border-color: oklch(0.72 0.08 255); background: #fff; }
+          .endpoint-output { margin: 0 10px 10px; max-height: 220px; font-size: 11px; background: oklch(0.985 0.003 260); }
+          .plugin-empty { padding: 32px 18px; color: var(--muted); }
+          .delivery-list { display: grid; gap: 8px; }
+          .delivery-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fafafa; }
+          .social-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+          .social-button { min-height: 42px; justify-content: flex-start; }
           .notice { min-height: 20px; color: var(--muted); margin: 10px 0 0; }
           .notice.error { color: var(--danger); }
           .notice.ok { color: var(--ok); }
@@ -250,6 +305,8 @@ module BetterAuthExamples
             .sidebar { position: static; height: auto; }
             .two { grid-template-columns: 1fr; }
             main { padding: 16px; }
+            .plugins-toolbar, .plugin-heading, .endpoint-line { grid-template-columns: 1fr; display: grid; }
+            .plugin-summary { justify-content: flex-start; }
             .database-studio { grid-template-columns: 1fr; }
             .database-rail { border-right: 0; border-bottom: 1px solid var(--line); }
             .records { max-height: 58dvh; }
@@ -264,6 +321,8 @@ module BetterAuthExamples
             <nav class="nav">
               <button data-view-button="home" class="active"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg></span>Home</button>
               <button data-view-button="sessions"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>Sessions</button>
+              <button data-view-button="social"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="16" r="3"/><path d="m10.2 10.2 3.6 3.6M16 5v5M19 8h-6M5 16h6M8 13v6"/></svg></span>Social</button>
+              <button data-view-button="plugins"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m12 2 2.4 6.8 7.2.2-5.7 4.4 2 7-5.9-4-5.9 4 2-7L2.4 9l7.2-.2L12 2Z"/></svg></span>Plugins</button>
               <button data-view-button="database"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7c0 1.7 3.6 3 8 3s8-1.3 8-3-3.6-3-8-3-8 1.3-8 3Z"/><path d="M4 7v5c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5"/></svg></span>Database</button>
               <button data-view-button="settings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 3.1h5l.4-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg></span>Settings</button>
             </nav>
@@ -300,6 +359,8 @@ module BetterAuthExamples
                   <label>Name <input name="name" value="Ada Lovelace" required></label>
                   <label>Email <input name="email" type="email" value="ada@example.com" required></label>
                   <label>Password <input name="password" type="password" value="password123" required></label>
+                  <label>Nickname <input name="nickname" value="Ada"></label>
+                  <label>Example role <input name="exampleRole" value="member"></label>
                   <label>Avatar URL <input name="image" placeholder="https://..."></label>
                   <button class="button primary" type="submit">Create account</button>
                 </form>
@@ -323,6 +384,43 @@ module BetterAuthExamples
               </div>
               <div class="panel"><h2>Current session</h2><pre id="session-json">null</pre></div>
               <div class="panel"><h2>Session list</h2><pre id="sessions-json">[]</pre></div>
+            </section>
+
+            <section data-view="social" hidden class="grid">
+              <div class="panel">
+                <div class="social-grid" id="social-provider-buttons">
+                  <% BetterAuthExamples::SocialProviderCatalog.all.each do |provider| %>
+                    <button class="button social-button" type="button" data-social-provider="<%= BetterAuthExamples::SocialProviderCatalog.lookup_id(provider) %>"><%= provider.fetch(:name) %></button>
+                  <% end %>
+                </div>
+                <p class="notice" id="social-notice"></p>
+              </div>
+            </section>
+
+            <section data-view="plugins" hidden class="grid">
+              <div class="panel plugins-panel">
+                <div class="plugins-toolbar">
+                  <div>
+                    <h2>Enabled plugins</h2>
+                    <div class="muted">Pick one plugin or keep All selected to scan every section in one column.</div>
+                  </div>
+                  <div class="actions">
+                    <button class="button" id="load-plugins" type="button">Reload plugins</button>
+                    <button class="button" id="clear-deliveries" type="button">Clear inbox</button>
+                  </div>
+                </div>
+                <p class="notice" id="plugins-notice"></p>
+                <div class="plugin-tabs" id="plugin-tabs"></div>
+                <div class="plugin-sections" id="plugin-sections"></div>
+              </div>
+              <div class="panel">
+                <h2>Local delivery inbox</h2>
+                <div class="delivery-list" id="delivery-list"></div>
+              </div>
+              <div class="panel">
+                <h2>Excluded packages</h2>
+                <pre id="excluded-plugins">[]</pre>
+              </div>
             </section>
 
             <section data-view="database" hidden class="grid">
@@ -426,7 +524,7 @@ module BetterAuthExamples
           </div>
         </dialog>
         <script>
-          const state = { settings: {}, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50 };
+          const state = { settings: {}, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50, plugins: [], activePlugin: "all", deliveries: [], excludedPlugins: [] };
           const SETTINGS_STORAGE_KEY = "better_auth_example_settings";
           const $ = (selector) => document.querySelector(selector);
           const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -438,10 +536,11 @@ module BetterAuthExamples
           }
 
           function jsonFetch(url, options = {}) {
+            const headers = { "content-type": "application/json", ...(options.headers || {}) };
             return fetch(url, {
               credentials: "include",
-              headers: { "content-type": "application/json", ...(options.headers || {}) },
-              ...options
+              ...options,
+              headers
             }).then(async (response) => {
               const text = await response.text();
               let data = null;
@@ -453,6 +552,24 @@ module BetterAuthExamples
 
           function formData(form) {
             return Object.fromEntries(new FormData(form).entries());
+          }
+
+          function authRequestOptions(method, body, headers = {}) {
+            const payload = body && typeof body === "object" && !Array.isArray(body) ? {...body} : body;
+            const options = { method, headers: {...headers} };
+            if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+              const captcha = payload.captchaResponse || payload.captcha_response || payload.captcha;
+              if (captcha) {
+                options.headers["x-captcha-response"] = captcha;
+                delete payload.captchaResponse;
+                delete payload.captcha_response;
+                delete payload.captcha;
+              }
+              options.body = JSON.stringify(payload);
+            } else if (payload !== undefined && payload !== null) {
+              options.body = payload;
+            }
+            return options;
           }
 
           function escapeHTML(value) {
@@ -470,6 +587,7 @@ module BetterAuthExamples
             $$("[data-view-button]").forEach((el) => el.classList.toggle("active", el.dataset.viewButton === view));
             $("#view-title").textContent = view[0].toUpperCase() + view.slice(1);
             if (view === "database") loadDatabase();
+            if (view === "plugins") loadPlugins();
           }
 
           function renderSettings() {
@@ -527,6 +645,177 @@ module BetterAuthExamples
               $("#sessions-json").textContent = JSON.stringify(sessions, null, 2);
             } catch (error) {
               $("#sessions-json").textContent = JSON.stringify({ error: error.message }, null, 2);
+            }
+          }
+
+          async function signInWithSocialProvider(button) {
+            const provider = button.dataset.socialProvider;
+            const buttons = $$("[data-social-provider]");
+            const originalLabel = button.textContent;
+            let navigating = false;
+            buttons.forEach((entry) => entry.disabled = true);
+            button.textContent = "Loading...";
+            showNotice("#social-notice", "");
+            try {
+              const data = await jsonFetch("/api/auth/sign-in/social", {
+                method: "POST",
+                body: JSON.stringify({provider, callbackURL: "/", errorCallbackURL: "/", disableRedirect: true})
+              });
+              if (data && data.url) {
+                navigating = true;
+                window.location.assign(data.url);
+              } else {
+                showNotice("#social-notice", `${provider}: signed in.`, "ok");
+                await loadCurrentSession();
+                await loadSessions();
+              }
+            } catch (error) {
+              showNotice("#social-notice", error.message, "error");
+            } finally {
+              if (!navigating) {
+                button.textContent = originalLabel;
+                buttons.forEach((entry) => entry.disabled = false);
+              }
+            }
+          }
+
+          function renderPlugins() {
+            if (!state.plugins.some((plugin) => plugin.id === state.activePlugin)) state.activePlugin = "all";
+            renderPluginTabs();
+            const visiblePlugins = state.activePlugin === "all"
+              ? state.plugins
+              : state.plugins.filter((plugin) => plugin.id === state.activePlugin);
+            $("#plugin-sections").innerHTML = visiblePlugins.map(renderPluginSection).join("") || `<div class="plugin-empty">No plugins enabled.</div>`;
+            $$("[data-run-endpoint]").forEach((button) => {
+              button.onclick = () => runPluginEndpoint(button);
+            });
+
+            renderDeliveries();
+            $("#excluded-plugins").textContent = JSON.stringify(state.excludedPlugins, null, 2);
+          }
+
+          function renderPluginTabs() {
+            const totalEndpoints = state.plugins.reduce((sum, plugin) => sum + ((plugin.endpoint_actions || plugin.endpoints || []).length), 0);
+            const tabs = [{id: "all", label: "All", count: totalEndpoints}].concat(
+              state.plugins.map((plugin) => ({id: plugin.id, label: plugin.id, count: (plugin.endpoint_actions || plugin.endpoints || []).length}))
+            );
+            $("#plugin-tabs").innerHTML = tabs.map((tab) => (
+              `<button class="plugin-tab ${state.activePlugin === tab.id ? "active" : ""}" type="button" data-plugin-tab="${escapeHTML(tab.id)}">
+                <span>${escapeHTML(tab.label)}</span><span class="plugin-tab-count">${escapeHTML(tab.count)}</span>
+              </button>`
+            )).join("");
+            $$("[data-plugin-tab]").forEach((button) => {
+              button.onclick = () => {
+                state.activePlugin = button.dataset.pluginTab;
+                renderPlugins();
+              };
+            });
+          }
+
+          function renderPluginSection(plugin) {
+            const schema = plugin.schema_tables && plugin.schema_tables.length ? plugin.schema_tables.join(", ") : "none";
+            const allows = (plugin.allows || []).map((item) => `<li>${escapeHTML(item)}</li>`).join("");
+            const endpointKeys = new Set((plugin.endpoint_actions || []).map((action) => `${action.method || "GET"} ${action.path}`));
+            const workflowActions = (plugin.examples || [])
+              .map((example) => ({...example, method: example.method || "GET"}))
+              .filter((example) => !endpointKeys.has(`${example.method} ${example.path}`));
+            const workflows = workflowActions.map((action) => renderEndpointAction(action, "workflow")).join("");
+            const actions = (plugin.endpoint_actions || []).map((action) => renderEndpointAction(action, "endpoint")).join("");
+            return `<section class="plugin-section" id="plugin-${escapeHTML(plugin.id)}">
+              <header class="plugin-section-header">
+                <div class="plugin-heading">
+                  <div>
+                    <h3>${escapeHTML(plugin.id)}</h3>
+                    <p class="plugin-description">${escapeHTML(plugin.description || "Enabled plugin.")}</p>
+                  </div>
+                  <div class="plugin-summary">
+                    <span class="pill">${escapeHTML((plugin.endpoint_actions || plugin.endpoints || []).length)} endpoints</span>
+                    <span class="pill">${escapeHTML((plugin.schema_tables || []).length)} tables</span>
+                  </div>
+                </div>
+                ${allows ? `<ul class="plugin-capabilities">${allows}</ul>` : ""}
+                <div class="plugin-details">
+                  <span>schema: ${escapeHTML(schema)}</span>
+                  <span>hooks: ${escapeHTML(plugin.hooks.before)} before, ${escapeHTML(plugin.hooks.after)} after</span>
+                </div>
+              </header>
+              ${workflows ? `<div class="action-group"><p class="action-group-title">Workflow examples</p>${workflows}</div>` : ""}
+              <div class="action-group">
+                <p class="action-group-title">Endpoint actions</p>
+                <div class="endpoint-actions">${actions || `<div class="plugin-empty">This plugin does not expose endpoints, but its hooks or schema are active.</div>`}</div>
+              </div>
+            </section>`;
+          }
+
+          function renderEndpointAction(action, kind) {
+            const method = action.method || "GET";
+            const methodClass = method.toLowerCase();
+            const hasPayload = action.body !== undefined && action.body !== null && method !== "GET";
+            const body = hasPayload ? JSON.stringify(action.body, null, 2) : "";
+            const pathLabel = kind === "workflow" && action.label ? `<span class="action-label">${escapeHTML(action.label)}</span>` : "";
+            return `<article class="endpoint-action" data-endpoint-action>
+              <div class="endpoint-line">
+                <span class="method-badge ${escapeHTML(methodClass)}">${escapeHTML(method)}</span>
+                <code class="endpoint-path">${pathLabel}${escapeHTML(action.path)}</code>
+                <button class="button" type="button" data-run-endpoint data-method="${escapeHTML(method)}" data-path="${escapeHTML(action.path)}">Send</button>
+              </div>
+              ${hasPayload ? `<details class="endpoint-payload"><summary>Request body</summary><textarea data-endpoint-body spellcheck="false">${escapeHTML(body)}</textarea></details>` : ""}
+              <pre class="endpoint-output" data-endpoint-output hidden></pre>
+            </article>`;
+          }
+
+          function renderDeliveries() {
+            $("#delivery-list").innerHTML = state.deliveries.map((delivery) => (
+              `<div class="delivery-item">
+                <div class="plugin-title"><span>${escapeHTML(delivery.plugin)}</span><span class="muted">${escapeHTML(delivery.created_at)}</span></div>
+                <pre>${escapeHTML(JSON.stringify(delivery.payload, null, 2))}</pre>
+              </div>`
+            )).join("") || `<div class="empty-state">No local deliveries yet.</div>`;
+          }
+
+          async function runPluginEndpoint(button) {
+            const method = button.dataset.method || "GET";
+            const path = button.dataset.path;
+            const originalLabel = button.textContent;
+            const action = button.closest("[data-endpoint-action]");
+            const output = action.querySelector("[data-endpoint-output]");
+            const bodyInput = action.querySelector("[data-endpoint-body]");
+            button.disabled = true;
+            button.textContent = "Loading...";
+            output.hidden = false;
+            output.textContent = "Loading...";
+            showNotice("#plugins-notice", "");
+            try {
+              const options = { method };
+              if (bodyInput) Object.assign(options, authRequestOptions(method, JSON.parse(bodyInput.value || "{}")));
+              const data = await jsonFetch(path, options);
+              output.textContent = JSON.stringify(data, null, 2);
+              showNotice("#plugins-notice", `${method} ${path} completed.`, "ok");
+              await loadCurrentSession();
+              await loadSessions();
+              const refreshed = await jsonFetch("/example/plugins");
+              state.deliveries = refreshed.deliveries || [];
+              renderDeliveries();
+            } catch (error) {
+              output.textContent = JSON.stringify({ error: error.message }, null, 2);
+              showNotice("#plugins-notice", error.message, "error");
+            } finally {
+              button.disabled = false;
+              button.textContent = originalLabel;
+            }
+          }
+
+          async function loadPlugins() {
+            showNotice("#plugins-notice", "Loading plugins...");
+            try {
+              const data = await jsonFetch("/example/plugins");
+              state.plugins = data.plugins || [];
+              state.deliveries = data.deliveries || [];
+              state.excludedPlugins = data.excluded || [];
+              renderPlugins();
+              showNotice("#plugins-notice", "Plugins loaded.", "ok");
+            } catch (error) {
+              showNotice("#plugins-notice", error.message, "error");
             }
           }
 
@@ -667,8 +956,12 @@ module BetterAuthExamples
 
           async function boot() {
             await loadSettings();
-            await loadCurrentSession();
-            await loadSessions();
+            const session = await loadCurrentSession();
+            if (session) {
+              await loadSessions();
+            } else {
+              $("#sessions-json").textContent = "[]";
+            }
           }
 
           async function refreshCurrentView() {
@@ -680,6 +973,12 @@ module BetterAuthExamples
           $("#refresh-all").onclick = refreshCurrentView;
           $("#load-session").onclick = loadCurrentSession;
           $("#load-sessions").onclick = loadSessions;
+          $$("[data-social-provider]").forEach((button) => button.onclick = () => signInWithSocialProvider(button));
+          $("#load-plugins").onclick = loadPlugins;
+          $("#clear-deliveries").onclick = async () => {
+            await jsonFetch("/example/plugins/clear-deliveries", { method: "POST", body: "{}" });
+            await loadPlugins();
+          };
           $("#reload-db").onclick = loadDatabase;
           $("#reload-db-toolbar").onclick = loadDatabase;
           $("#table-filter").oninput = renderDatabase;
@@ -715,7 +1014,9 @@ module BetterAuthExamples
           $("#signup-form").onsubmit = async (event) => {
             event.preventDefault();
             try {
-              await jsonFetch("/api/auth/sign-up/email", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
+              const body = formData(event.currentTarget);
+              body.captchaResponse = "example-token";
+              await jsonFetch("/api/auth/sign-up/email", authRequestOptions("POST", body));
               showNotice("#auth-notice", "Account created.", "ok");
               await loadCurrentSession();
               await loadSessions();

@@ -71,6 +71,8 @@ module BetterAuthExamples
         verification: {store_in_database: true},
         secondary_storage: RateLimitSettings.secondary_storage(settings),
         rate_limit: RateLimitSettings.config(settings),
+        plugins: PluginCatalog.plugins(app_name: app_name),
+        social_providers: SocialProviderCatalog.configured,
         telemetry: {disabled: true}
       )
       DatabaseProviders.prepare!(auth, root_path: root_path)

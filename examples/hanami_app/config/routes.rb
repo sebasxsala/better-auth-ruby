@@ -21,6 +21,10 @@ module HanamiApp
     get "/example/settings", to: dashboard
     post "/example/settings", to: dashboard
     get "/example/database", to: dashboard
+    post "/example/database/delete", to: dashboard
+    get "/example/plugins", to: dashboard
+    post "/example/plugins/clear-deliveries", to: dashboard
+    get "/example/social-providers", to: dashboard
     post "/example/reset", to: dashboard
   end
 end

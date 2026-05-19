@@ -1,8 +1,13 @@
 # frozen_string_literal: true
 
+require_relative "better_auth_examples/env_loader"
+BetterAuthExamples::EnvLoader.load!
+
 require_relative "better_auth_examples/settings"
 require_relative "better_auth_examples/rate_limit_settings"
 require_relative "better_auth_examples/database_providers"
+require_relative "better_auth_examples/plugin_catalog"
+require_relative "better_auth_examples/social_provider_catalog"
 require_relative "better_auth_examples/auth_registry"
 require_relative "better_auth_examples/dynamic_auth"
 require_relative "better_auth_examples/dashboard_app"

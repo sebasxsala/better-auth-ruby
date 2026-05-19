@@ -1,4 +1,10 @@
 PATH
+  remote: ../../packages/better_auth-api-key
+  specs:
+    better_auth-api-key (0.8.0)
+      better_auth (~> 0.1)
+
+PATH
   remote: ../../packages/better_auth-hanami
   specs:
     better_auth-hanami (0.8.0)
@@ -18,11 +24,49 @@ PATH
       mongo (~> 2.21)
 
 PATH
+  remote: ../../packages/better_auth-oauth-provider
+  specs:
+    better_auth-oauth-provider (0.8.0)
+      better_auth (~> 0.1)
+
+PATH
+  remote: ../../packages/better_auth-passkey
+  specs:
+    better_auth-passkey (0.8.0)
+      base64 (>= 0.2, < 1.0)
+      better_auth (~> 0.1)
+      webauthn (~> 3.4, >= 3.4.3)
+
+PATH
   remote: ../../packages/better_auth-redis-storage
   specs:
     better_auth-redis-storage (0.8.0)
       better_auth (~> 0.1)
       redis (>= 5, < 6)
+
+PATH
+  remote: ../../packages/better_auth-scim
+  specs:
+    better_auth-scim (0.8.0)
+      base64 (>= 0.2, < 1.0)
+      better_auth (~> 0.1)
+
+PATH
+  remote: ../../packages/better_auth-sso
+  specs:
+    better_auth-sso (0.8.0)
+      base64 (>= 0.2, < 1.0)
+      better_auth (~> 0.1)
+      jwt (~> 2.8)
+      logger (>= 1.6, < 2.0)
+      ruby-saml (~> 1.18, >= 1.18.1)
+
+PATH
+  remote: ../../packages/better_auth-stripe
+  specs:
+    better_auth-stripe (0.8.0)
+      better_auth (~> 0.1)
+      stripe (>= 13, < 20)
 
 PATH
   remote: ../../packages/better_auth
@@ -39,12 +83,14 @@ GEM
   specs:
     addressable (2.9.0)
       public_suffix (>= 2.0.2, < 8.0)
+    android_key_attestation (0.3.0)
     base64 (0.3.0)
     better_errors (2.10.1)
       erubi (>= 1.0.0)
       rack (>= 0.9.0)
       rouge (>= 1.0.0)
     bigdecimal (3.3.1)
+    bindata (2.5.1)
     binding_of_caller (1.0.1)
       debug_inspector (>= 1.2.0)
     bson (5.2.0)
@@ -57,9 +103,13 @@ GEM
       rack-test (>= 0.6.3)
       regexp_parser (>= 1.5, < 3.0)
       xpath (~> 3.2)
+    cbor (0.5.10.2)
     coderay (1.1.3)
     concurrent-ruby (1.3.6)
     connection_pool (3.0.2)
+    cose (1.3.1)
+      cbor (~> 0.5.9)
+      openssl-signature_algorithm (~> 1.0)
     csv (3.3.5)
     database_cleaner-core (2.0.1)
     database_cleaner-sequel (2.0.2)
@@ -289,6 +339,9 @@ GEM
     notiffany (0.1.3)
       nenv (~> 0.1)
       shellany (~> 0.0)
+    openssl (4.0.2)
+    openssl-signature_algorithm (1.3.0)
+      openssl (> 2.0)
     pg (1.6.3)
     pg (1.6.3-aarch64-linux)
     pg (1.6.3-aarch64-linux-musl)
@@ -334,6 +387,7 @@ GEM
     regexp_parser (2.12.0)
     reline (0.6.3)
       io-console (~> 0.5)
+    rexml (3.4.4)
     rom (5.4.3)
       rom-changeset (~> 5.4)
       rom-core (~> 5.4)
@@ -374,6 +428,11 @@ GEM
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
     rspec-support (3.13.7)
+    ruby-saml (1.18.1)
+      nokogiri (>= 1.13.10)
+      rexml
+    safety_net_attestation (0.5.0)
+      jwt (>= 2.0, < 4.0)
     sequel (5.103.0)
       bigdecimal
     shellany (0.0.1)
@@ -388,12 +447,27 @@ GEM
     sqlite3 (2.9.3-x86_64-linux-gnu)
     sqlite3 (2.9.3-x86_64-linux-musl)
     stringio (3.2.0)
+    stripe (19.1.0)
+      bigdecimal
+      logger
     temple (0.10.4)
     thor (1.5.0)
     tilt (2.7.0)
     tiny_tds (2.1.7)
+    tpm-key_attestation (0.14.1)
+      bindata (~> 2.4)
+      openssl (> 2.0)
+      openssl-signature_algorithm (~> 1.0)
     transproc (1.1.1)
     tsort (0.2.0)
+    webauthn (3.4.3)
+      android_key_attestation (~> 0.3.0)
+      bindata (~> 2.4)
+      cbor (~> 0.5.9)
+      cose (~> 1.1)
+      openssl (>= 2.2)
+      safety_net_attestation (~> 0.5.0)
+      tpm-key_attestation (~> 0.14.0)
     xpath (3.2.0)
       nokogiri (~> 1.8)
     zeitwerk (2.7.5)
@@ -412,9 +486,15 @@ PLATFORMS
 
 DEPENDENCIES
   better_auth!
+  better_auth-api-key!
   better_auth-hanami!
   better_auth-mongodb!
+  better_auth-oauth-provider!
+  better_auth-passkey!
   better_auth-redis-storage!
+  better_auth-scim!
+  better_auth-sso!
+  better_auth-stripe!
   capybara
   database_cleaner-sequel
   dotenv
