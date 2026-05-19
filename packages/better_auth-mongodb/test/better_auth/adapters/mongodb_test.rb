@@ -666,27 +666,28 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
         nullableReference: nil
       }
     )
-    stored = @database.collection("typedModel").documents.first
+    collection = @database.collection(adapter.send(:collection_name, "typedModel"))
+    stored = collection.documents.first
 
     assert_equal({"theme" => "dark"}, record.fetch("jsonData"))
     assert_equal JSON.generate("theme" => "dark"), stored.fetch("json_data")
     assert_nil stored.fetch("nullable_reference")
 
     adapter.find_many(model: "typedModel", where: [{field: "score", value: "7"}])
-    assert_equal({"score" => 7}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+    assert_equal({"score" => 7}, collection.aggregate_pipelines.last.first.first.fetch("$match"))
 
     adapter.find_many(model: "typedModel", where: [{field: "enabled", value: "false"}])
-    assert_equal({"enabled" => false}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+    assert_equal({"enabled" => false}, collection.aggregate_pipelines.last.first.first.fetch("$match"))
 
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: ["7", "8"]}])
-    assert_equal({"score" => {"$in" => [7, 8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+    assert_equal({"score" => {"$in" => [7, 8]}}, collection.aggregate_pipelines.last.first.first.fetch("$match"))
 
     assert_bad_request do
       adapter.find_many(model: "typedModel", where: [{field: "score", operator: "in", value: "7"}])
     end
 
     adapter.find_many(model: "typedModel", where: [{field: "score", operator: "not_in", value: "8"}])
-    assert_equal({"score" => {"$nin" => [8]}}, @database.collection("typedModel").aggregate_pipelines.last.first.first.fetch("$match"))
+    assert_equal({"score" => {"$nin" => [8]}}, collection.aggregate_pipelines.last.first.first.fetch("$match"))
   end
 
   def test_mongodb_adapter_stores_default_plugin_fields_as_snake_case
@@ -704,7 +705,7 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
 
     adapter.create(model: "storageModel", data: {camelCaseField: "value"})
-    stored = @database.collection("storageModel").documents.first
+    stored = @database.collection(adapter.send(:collection_name, "storageModel")).documents.first
 
     assert_equal "value", stored.fetch("camel_case_field")
     refute stored.key?("camelCaseField")

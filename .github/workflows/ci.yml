@@ -158,6 +158,48 @@ jobs:
         working-directory: packages/better_auth-passkey
         run: bundle exec rake test
 
+  test-cli:
+    name: Test better_auth-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-cli
+
+      - name: Run linter
+        working-directory: packages/better_auth-cli
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-cli
+        run: bundle exec rake test
+
+  test-openauth-cli:
+    name: Test openauth-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/openauth-cli
+
+      - name: Run linter
+        working-directory: packages/openauth-cli
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/openauth-cli
+        run: bundle exec rake test
+
   test-api-key:
     name: Test better_auth-api-key (API Key Plugin)
     runs-on: ubuntu-latest
@@ -298,6 +340,27 @@ jobs:
 
       - name: Run tests
         working-directory: packages/better_auth-hanami
+        run: bundle exec rspec
+
+  test-grape:
+    name: Test better_auth-grape (Grape Adapter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-grape
+
+      - name: Run linter
+        working-directory: packages/better_auth-grape
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-grape
         run: bundle exec rspec
 
   test-oauth-provider:
@@ -516,10 +579,14 @@ jobs:
       - test-core
       - test-workspace
       - test-passkey
+      - test-cli
+      - test-openauth-cli
       - test-api-key
       - test-rails
       - test-sinatra
       - test-hanami
+      - test-grape
+      - test-roda
       - test-oauth-provider
       - test-redis-storage
       - test-mongodb

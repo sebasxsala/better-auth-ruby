@@ -54,7 +54,12 @@ module BetterAuth
     end
 
     def oauth_get_client_public_prelogin_endpoint(config)
-      Endpoint.new(path: "/oauth2/public-client-prelogin", method: "POST", metadata: oauth_openapi_for(:public_client_prelogin)) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/public-client-prelogin",
+        method: "POST",
+        body_schema: ->(value) { value },
+        metadata: oauth_openapi_for(:public_client_prelogin)
+      ) do |ctx|
         input = OAuthProtocol.stringify_keys(ctx.body).merge(OAuthProtocol.stringify_keys(ctx.query))
         unless config[:allow_public_client_prelogin] || config[:allowPublicClientPrelogin]
           raise APIError.new("BAD_REQUEST")

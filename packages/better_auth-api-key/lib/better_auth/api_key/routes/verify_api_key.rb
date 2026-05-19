@@ -9,7 +9,12 @@ module BetterAuth
         module_function
 
         def endpoint(config)
-          BetterAuth::Endpoint.new(path: "/api-key/verify", method: "POST", metadata: Routes.openapi_for(:verify_api_key)) do |ctx|
+          BetterAuth::Endpoint.new(
+            path: "/api-key/verify",
+            method: "POST",
+            body_schema: ->(value) { value },
+            metadata: Routes.openapi_for(:verify_api_key)
+          ) do |ctx|
             body = BetterAuth::Plugins.normalize_hash(ctx.body)
             resolved_config = BetterAuth::Plugins.api_key_resolve_config(ctx.context, config, body[:config_id])
             key = body[:key]

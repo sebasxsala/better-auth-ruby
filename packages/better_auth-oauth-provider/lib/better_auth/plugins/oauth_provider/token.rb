@@ -5,7 +5,12 @@ module BetterAuth
     module_function
 
     def oauth_token_endpoint(config)
-      Endpoint.new(path: "/oauth2/token", method: "POST", metadata: oauth_openapi_for(:token).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])) do |ctx|
+      Endpoint.new(
+        path: "/oauth2/token",
+        method: "POST",
+        body_schema: ->(value) { value },
+        metadata: oauth_openapi_for(:token).merge(allowed_media_types: ["application/x-www-form-urlencoded", "application/json"])
+      ) do |ctx|
         body = OAuthProtocol.request_body!(ctx.body)
         client = OAuthProtocol.authenticate_client!(ctx, "oauthClient", store_client_secret: config[:store_client_secret], prefix: config[:prefix])
         client_id = OAuthProtocol.stringify_keys(client)["clientId"]

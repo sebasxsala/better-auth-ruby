@@ -41,13 +41,12 @@ module BetterAuth
     end
 
     def call(context)
-      apply_schemas!(context)
-
       use.each do |middleware|
         middleware_result = middleware.call(context)
         return Result.from_value(middleware_result, context) if middleware_result
       end
 
+      apply_schemas!(context)
       Result.from_value(handler.call(context), context)
     end
 
