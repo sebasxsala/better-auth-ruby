@@ -85,6 +85,10 @@ RSpec.describe BetterAuth::Grape::Migration do
     BetterAuthGrapeFailingSQLAdapter.reset!
   end
 
+  it "delegates public SQL migration helpers such as plan" do
+    expect(described_class).to respond_to(:plan)
+  end
+
   it "renders core SQL migrations including plugin schemas" do
     plugin = BetterAuth::Plugin.new(
       id: "api-key-test",
@@ -107,6 +111,21 @@ RSpec.describe BetterAuth::Grape::Migration do
     expect(sql).to include('CREATE TABLE IF NOT EXISTS "users"')
     expect(sql).to include('CREATE TABLE IF NOT EXISTS "api_keys"')
     expect(sql).to include('CREATE INDEX IF NOT EXISTS "index_api_keys_on_user_id"')
+  end
+
+  it "renders SQL migrations for supported core dialects" do
+    config = BetterAuth::Configuration.new(secret: secret, database: :memory)
+
+    {
+      postgres: '"users"',
+      mysql: "`users`",
+      sqlite: '"users"'
+    }.each do |dialect, quoted_users|
+      sql = described_class.render(config, dialect: dialect)
+
+      expect(sql).to include("-- Dialect: #{dialect}")
+      expect(sql).to include("CREATE TABLE IF NOT EXISTS #{quoted_users}")
+    end
   end
 
   it "rejects migration execution for adapters without SQL dialect support" do
@@ -258,6 +277,30 @@ RSpec.describe BetterAuth::Grape::Migration do
         expect {
           Rake::Task["better_auth:doctor"].invoke
         }.to output(/OK config loaded/).to_stdout
+      end
+    end
+  ensure
+    Rake.application = Rake::Application.new
+  end
+
+  it "prints pending SQL adapter migration status through the migrate status Rake task" do
+    Dir.mktmpdir("better-auth-grape-tasks") do |dir|
+      in_directory(dir) do
+        load_tasks
+        FileUtils.mkdir_p("config")
+        File.write(
+          "config/better_auth.rb",
+          <<~RUBY
+            BetterAuth::Grape.configure do |config|
+              config.secret = #{secret.inspect}
+              config.database = ->(options) { BetterAuthGrapeFakeSQLAdapter.new(options, BetterAuthGrapeFakeSQLConnection.new) }
+            end
+          RUBY
+        )
+
+        expect {
+          Rake::Task["better_auth:migrate:status"].invoke
+        }.to output(/create table users/).to_stdout
       end
     end
   ensure
