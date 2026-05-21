@@ -4,6 +4,8 @@ require "json"
 require_relative "../../test_helper"
 
 class BetterAuthMySQLAdapterTest < Minitest::Test
+  include BetterAuthMySQLTestHelpers
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_mysql_adapter_can_be_instantiated_without_rails
@@ -29,7 +31,7 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
       database: ENV.fetch("BETTER_AUTH_MYSQL_DATABASE", "better_auth"),
       symbolize_keys: false
     )
-    reset_schema(connection)
+    reset_mysql_schema(connection)
     BetterAuth::Schema::SQL.create_statements(config, dialect: :mysql).each { |statement| connection.query(statement) }
     adapter = BetterAuth::Adapters::MySQL.new(config, connection: connection)
 
@@ -52,7 +54,7 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
 
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = mysql_connection
-    reset_schema(connection)
+    reset_mysql_schema(connection)
     create_schema(connection, config)
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",
@@ -95,7 +97,7 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
 
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = mysql_connection
-    reset_schema(connection)
+    reset_mysql_schema(connection)
     create_schema(connection, config)
 
     sql = BetterAuth::SQLMigration.render_pending(config, connection: connection, dialect: :mysql, generator: "better_auth-test")
@@ -110,26 +112,45 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
     connection&.close
   end
 
-  private
+  def test_mysql_pending_migration_adds_plugin_table_after_core_schema
+    require "mysql2"
 
-  def mysql_connection
-    Mysql2::Client.new(
-      host: ENV.fetch("BETTER_AUTH_MYSQL_HOST", "127.0.0.1"),
-      port: ENV.fetch("BETTER_AUTH_MYSQL_PORT", "3306").to_i,
-      username: ENV.fetch("BETTER_AUTH_MYSQL_USER", "user"),
-      password: ENV.fetch("BETTER_AUTH_MYSQL_PASSWORD", "password"),
-      database: ENV.fetch("BETTER_AUTH_MYSQL_DATABASE", "better_auth"),
-      symbolize_keys: false
+    plugin = BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            id: {type: "string", required: true},
+            userId: {type: "string", required: true, references: {model: "user", field: "id"}, index: true},
+            action: {type: "string", required: true, index: true}
+          }
+        }
+      }
     )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    plugin_config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    connection = mysql_connection
+    reset_mysql_schema(connection)
+    create_schema(connection, config)
+
+    sql = BetterAuth::SQLMigration.render_pending(plugin_config, connection: connection, dialect: :mysql, generator: "better_auth-test")
+
+    assert_includes sql, "CREATE TABLE IF NOT EXISTS `audit_logs`"
+    assert_includes sql, "CONSTRAINT `fk_audit_logs_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE"
+
+    BetterAuth::SQLMigration.execute_sql(connection, sql)
+
+    assert_includes mysql_table_names(connection), "audit_logs"
+  rescue LoadError
+    skip "mysql2 gem is not installed"
+  rescue Mysql2::Error::ConnectionError
+    skip "MySQL test service is not available"
+  ensure
+    connection&.close
   end
 
-  def reset_schema(connection)
-    connection.query("SET FOREIGN_KEY_CHECKS = 0")
-    %w[rate_limits verifications accounts sessions users].each do |table|
-      connection.query("DROP TABLE IF EXISTS `#{table}`")
-    end
-    connection.query("SET FOREIGN_KEY_CHECKS = 1")
-  end
+  private
 
   def create_schema(connection, config)
     BetterAuth::Schema::SQL.create_statements(config, dialect: :mysql).each { |statement| connection.query(statement) }
