@@ -43,6 +43,37 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
     assert_equal 3, @adapter.count(model: "user", where: [{field: "email", operator: "contains", value: "@example.com"}])
   end
 
+  def test_serial_ids_are_generated_as_numbers_and_coerced_in_where_values
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, advanced: {database: {generate_id: "serial"}})
+    adapter = BetterAuth::Adapters::Memory.new(config)
+
+    first = adapter.create(model: "user", data: {name: "Ada", email: "ada@example.com"})
+    second = adapter.create(model: "user", data: {name: "Grace", email: "grace@example.com"})
+    session = adapter.create(model: "session", data: {userId: "1", token: "token-1", expiresAt: Time.now + 60})
+
+    assert_equal 1, first["id"]
+    assert_equal 2, second["id"]
+    assert_equal first, adapter.find_one(model: "user", where: [{field: "id", value: "1"}])
+    assert_equal session, adapter.find_one(model: "session", where: [{field: "userId", value: 1}])
+  end
+
+  def test_find_many_supports_case_insensitive_string_where_modes
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada Lovelace", email: "Ada@Example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-2", name: "Grace Hopper", email: "grace@example.com"}, force_allow_id: true)
+
+    eq = @adapter.find_many(model: "user", where: [{field: "email", value: "ada@example.com", mode: "insensitive"}])
+    in_values = @adapter.find_many(model: "user", where: [{field: "email", operator: "in", value: ["ADA@EXAMPLE.COM"], mode: "insensitive"}])
+    contains = @adapter.find_many(model: "user", where: [{field: "name", operator: "contains", value: "love", mode: "insensitive"}])
+    starts_with = @adapter.find_many(model: "user", where: [{field: "name", operator: "starts_with", value: "ada", mode: "insensitive"}])
+    not_in = @adapter.find_many(model: "user", where: [{field: "email", operator: "not_in", value: ["GRACE@EXAMPLE.COM"], mode: "insensitive"}])
+
+    assert_equal ["user-1"], eq.map { |user| user["id"] }
+    assert_equal ["user-1"], in_values.map { |user| user["id"] }
+    assert_equal ["user-1"], contains.map { |user| user["id"] }
+    assert_equal ["user-1"], starts_with.map { |user| user["id"] }
+    assert_equal ["user-1"], not_in.map { |user| user["id"] }
+  end
+
   def test_find_many_preserves_false_where_values
     verified = @adapter.create(model: "user", data: {id: "user-true", name: "Verified", email: "verified@example.com"}, force_allow_id: true)
     unverified = @adapter.create(model: "user", data: {id: "user-false", name: "Unverified", email: "unverified@example.com"}, force_allow_id: true)
@@ -116,5 +147,79 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
 
     assert_equal session["token"], found["token"]
     assert_equal user, found["user"]
+  end
+
+  def test_find_one_with_join_infers_plugin_one_to_one_reference
+    plugin = BetterAuth::Plugin.new(
+      id: "profile",
+      schema: {
+        profile: {
+          model_name: "profiles",
+          fields: {
+            userId: {type: "string", required: true, unique: true, references: {model: "user", field: "id"}},
+            bio: {type: "string", required: false}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::Memory.new(config)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    profile = adapter.create(model: "profile", data: {userId: user["id"], bio: "hello"})
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user["id"]}], join: {profile: true})
+
+    assert_equal profile, found["profile"]
+  end
+
+  def test_find_many_with_join_infers_plugin_collection_reference_and_honors_limit
+    plugin = BetterAuth::Plugin.new(
+      id: "audit",
+      schema: {
+        auditLog: {
+          model_name: "audit_logs",
+          fields: {
+            userId: {type: "string", required: true, references: {model: "user", field: "id"}},
+            action: {type: "string", required: true}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::Memory.new(config)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    first = adapter.create(model: "auditLog", data: {userId: user["id"], action: "first"})
+    adapter.create(model: "auditLog", data: {userId: user["id"], action: "second"})
+
+    found = adapter.find_one(model: "user", where: [{field: "id", value: user["id"]}], join: {auditLog: {limit: 1}})
+
+    assert_equal [first], found["auditLog"]
+  end
+
+  def test_find_one_with_join_supports_explicit_join_configuration
+    plugin = BetterAuth::Plugin.new(
+      id: "profile",
+      schema: {
+        profile: {
+          model_name: "profiles",
+          fields: {
+            ownerEmail: {type: "string", required: true, unique: true},
+            bio: {type: "string", required: false}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::Memory.new(config)
+    user = adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    profile = adapter.create(model: "profile", data: {ownerEmail: user["email"], bio: "hello"})
+
+    found = adapter.find_one(
+      model: "user",
+      where: [{field: "id", value: user["id"]}],
+      join: {profile: {on: {from: "email", to: "ownerEmail"}, relation: "one-to-one"}}
+    )
+
+    assert_equal profile, found["profile"]
   end
 end

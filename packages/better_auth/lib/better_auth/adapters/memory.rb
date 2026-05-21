@@ -6,6 +6,8 @@ require "time"
 module BetterAuth
   module Adapters
     class Memory < Base
+      include JoinSupport
+
       attr_reader :db
 
       def initialize(options, db = nil)
@@ -115,10 +117,10 @@ module BetterAuth
             raise APIError.new("BAD_REQUEST", message: "#{field} is required") unless field == "id"
           end
 
-          output[field] = coerce_value(value, attributes) if value_provided
+          output[field] = coerce_value(value, field, attributes) if value_provided
         end
 
-        output["id"] = generated_id if action == "create" && !output.key?("id") && fields.key?("id")
+        output["id"] = generated_id(model) if action == "create" && fields.key?("id") && (!output.key?("id") || output["id"].nil?)
         output
       end
 
@@ -139,9 +141,10 @@ module BetterAuth
         raise APIError.new("BAD_REQUEST", message: "No fields to update") unless has_updatable_field
       end
 
-      def generated_id
+      def generated_id(model)
         generator = options.advanced.dig(:database, :generate_id)
         return generator.call.to_s if generator.respond_to?(:call)
+        return table_for(model).length + 1 if generator == "serial"
         return SecureRandom.uuid if generator == "uuid"
 
         SecureRandom.hex(16)
@@ -151,8 +154,9 @@ module BetterAuth
         default.respond_to?(:call) ? default.call : default
       end
 
-      def coerce_value(value, attributes)
+      def coerce_value(value, field, attributes)
         return value if value.nil?
+        return coerce_number(value) if serial_id_field?(field, attributes)
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
 
         value
@@ -178,8 +182,10 @@ module BetterAuth
         field = Schema.storage_key(fetch_key(clause, :field))
         value = fetch_key(clause, :value)
         operator = (fetch_key(clause, :operator) || "eq").to_s
+        mode = (fetch_key(clause, :mode) || "sensitive").to_s
         current = record[field]
         comparable = coerce_where_value(record, field, value, operator)
+        current, comparable = insensitive_values(current, comparable) if insensitive_comparison?(mode, current, comparable)
 
         case operator
         when "in"
@@ -210,9 +216,9 @@ module BetterAuth
       def coerce_where_value(record, field, value, operator)
         attributes = schema_for_record_field(record, field)
         return value unless attributes
-        return Array(value).map { |entry| coerce_scalar_where_value(entry, attributes) } if %w[in not_in].include?(operator)
+        return Array(value).map { |entry| coerce_scalar_where_value(entry, field, attributes) } if %w[in not_in].include?(operator)
 
-        coerce_scalar_where_value(value, attributes)
+        coerce_scalar_where_value(value, field, attributes)
       end
 
       def schema_for_record_field(record, field)
@@ -224,8 +230,9 @@ module BetterAuth
         nil
       end
 
-      def coerce_scalar_where_value(value, attributes)
+      def coerce_scalar_where_value(value, field, attributes)
         return value if value.nil?
+        return coerce_number(value) if serial_id_field?(field, attributes)
 
         case attributes[:type]
         when "boolean"
@@ -242,6 +249,32 @@ module BetterAuth
         end
 
         value
+      end
+
+      def serial_id_field?(field, attributes)
+        return false unless options.advanced.dig(:database, :generate_id) == "serial"
+        return true if field.to_s == "id"
+
+        reference = attributes[:references]
+        return false unless reference
+
+        (reference[:field] || reference["field"]).to_s == "id"
+      end
+
+      def insensitive_comparison?(mode, current, comparable)
+        return false unless mode == "insensitive"
+
+        current.is_a?(String) && (comparable.is_a?(String) || comparable.is_a?(Array))
+      end
+
+      def insensitive_values(current, comparable)
+        normalized_current = current.downcase
+        normalized_comparable = if comparable.is_a?(Array)
+          comparable.map { |entry| entry.is_a?(String) ? entry.downcase : entry }
+        else
+          comparable.downcase
+        end
+        [normalized_current, normalized_comparable]
       end
 
       def coerce_number(value)
@@ -275,16 +308,74 @@ module BetterAuth
 
       def apply_join(model, record, join)
         joined = record.dup
-        join.each_key do |join_model|
-          join_model = join_model.to_s
-          joined[join_model] = case [model, join_model]
-          when ["session", "user"], ["account", "user"]
-            table_for("user").find { |user| user["id"] == record["userId"] }
-          when ["user", "account"]
-            table_for("account").select { |account| account["userId"] == record["id"] }
+        normalized_join(model, join).each do |join_model, config|
+          matches = table_for(join_model).select do |join_record|
+            join_record[config.fetch(:to)] == record[config.fetch(:from)]
+          end.map(&:dup)
+
+          joined[join_model] = if one_to_one_join?(config)
+            matches.first
+          else
+            matches.first(join_limit(config))
           end
         end
         joined
+      end
+
+      def one_to_one_join?(config)
+        config[:relation] == "one-to-one" || config[:unique] == true
+      end
+
+      def join_limit(config)
+        value = config[:limit]
+        return 100 if value.nil?
+
+        parsed = Integer(value)
+        parsed.positive? ? parsed : 100
+      rescue ArgumentError, TypeError
+        100
+      end
+
+      def inferred_join_config(model, join_model)
+        foreign_keys = schema_for(join_model).fetch(:fields).select do |_field, attributes|
+          reference_model_matches?(attributes, model)
+        end
+        forward_join = true
+
+        if foreign_keys.empty?
+          foreign_keys = schema_for(model).fetch(:fields).select do |_field, attributes|
+            reference_model_matches?(attributes, join_model)
+          end
+          forward_join = false
+        end
+
+        raise Error, "No foreign key found for model #{join_model} and base model #{model} while performing join operation." if foreign_keys.empty?
+        raise Error, "Multiple foreign keys found for model #{join_model} and base model #{model} while performing join operation. Only one foreign key is supported." if foreign_keys.length > 1
+
+        foreign_key, attributes = foreign_keys.first
+        reference = attributes.fetch(:references)
+        if forward_join
+          unique = attributes[:unique] == true
+          {from: reference.fetch(:field).to_s, to: foreign_key, relation: unique ? "one-to-one" : "one-to-many", unique: unique}
+        else
+          {from: foreign_key, to: reference.fetch(:field).to_s, relation: "one-to-one", unique: true}
+        end
+      end
+
+      def schema_for(model)
+        Schema.auth_tables(options).fetch(model.to_s)
+      end
+
+      def reference_model_matches?(attributes, model)
+        reference = attributes[:references]
+        return false unless reference
+
+        reference_model = reference[:model] || reference["model"]
+        reference_model.to_s == model.to_s || reference_model.to_s == schema_for(model).fetch(:model_name)
+      end
+
+      def storage_key(field)
+        Schema.storage_key(field)
       end
 
       def stringify_keys(data)
