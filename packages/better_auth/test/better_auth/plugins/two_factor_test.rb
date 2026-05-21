@@ -109,6 +109,26 @@ class BetterAuthPluginsTwoFactorTest < Minitest::Test
     assert_equal "otp-fallback@example.com", verified[:user]["email"]
   end
 
+  def test_second_factor_verification_rejects_missing_or_invalid_two_factor_cookie
+    auth = build_auth(
+      plugins: [
+        BetterAuth::Plugins.two_factor(otp_options: {send_otp: ->(_data, _ctx = nil) {}})
+      ]
+    )
+
+    missing = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_two_factor_otp(body: {code: "000000"})
+    end
+    assert_equal 401, missing.status_code
+    assert_equal BetterAuth::Plugins::TWO_FACTOR_ERROR_CODES["INVALID_TWO_FACTOR_COOKIE"], missing.message
+
+    invalid = assert_raises(BetterAuth::APIError) do
+      auth.api.verify_totp(headers: {"cookie" => "better-auth.two_factor=not-signed"}, body: {code: "000000"})
+    end
+    assert_equal 401, invalid.status_code
+    assert_equal BetterAuth::Plugins::TWO_FACTOR_ERROR_CODES["INVALID_TWO_FACTOR_COOKIE"], invalid.message
+  end
+
   def test_sign_in_response_includes_available_two_factor_methods
     auth = build_auth(
       plugins: [

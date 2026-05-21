@@ -258,6 +258,23 @@ class BetterAuthPluginsJWTTest < Minitest::Test
     assert_match(/HS256/, error.message)
   end
 
+  def test_jwt_remote_jwks_options_require_explicit_algorithm_and_remote_signer
+    sign_without_remote = assert_raises(BetterAuth::Error) do
+      build_auth(plugins: [BetterAuth::Plugins.jwt(jwt: {sign: ->(_payload, _ctx = nil) { "signed" }})])
+    end
+    assert_includes sign_without_remote.message, "remoteUrl"
+
+    remote_without_alg = assert_raises(BetterAuth::Error) do
+      build_auth(plugins: [BetterAuth::Plugins.jwt(jwks: {remote_url: "https://issuer.example/jwks"})])
+    end
+    assert_includes remote_without_alg.message, "keyPairConfig.alg"
+
+    invalid_path = assert_raises(BetterAuth::Error) do
+      build_auth(plugins: [BetterAuth::Plugins.jwt(jwks: {jwks_path: "../jwks"})])
+    end
+    assert_includes invalid_path.message, "jwksPath"
+  end
+
   def test_verify_jwt_uses_kid_selection_and_rejects_unknown_kid
     auth = build_auth(plugins: [BetterAuth::Plugins.jwt])
     first = auth.api.sign_jwt(body: {payload: {sub: "first"}})
