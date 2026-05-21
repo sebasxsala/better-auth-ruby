@@ -82,4 +82,75 @@ class BetterAuthPasskeyRoutesManagementTest < Minitest::Test
     assert_equal missing.message, other.message
     assert_equal "Original", auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: other_passkey.fetch("id")}]).fetch("name")
   end
+
+  def test_delete_rechecks_owner_during_final_mutation
+    auth = build_auth
+    first_cookie = sign_up_cookie(auth, email: "first-delete-race-route@example.com")
+    second_cookie = sign_up_cookie(auth, email: "second-delete-race-route@example.com")
+    first_user = auth.api.get_session(headers: {"cookie" => first_cookie})[:user]
+    second_user = auth.api.get_session(headers: {"cookie" => second_cookie})[:user]
+    passkey = create_passkey(auth, user_id: first_user.fetch("id"), name: "Race delete", credential_id: "delete-race-route")
+    adapter = auth.context.adapter
+    original_find_one = adapter.method(:find_one)
+    transferred = false
+
+    error = assert_raises(BetterAuth::APIError) do
+      adapter.stub(:find_one, lambda { |**kwargs|
+        result = original_find_one.call(**kwargs)
+        if !transferred && passkey_lookup?(kwargs, passkey.fetch("id"), first_user.fetch("id")) && result
+          transferred = true
+          adapter.update(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}], update: {userId: second_user.fetch("id")})
+        end
+        result
+      }) do
+        auth.api.delete_passkey(headers: {"cookie" => first_cookie}, body: {id: passkey.fetch("id")})
+      end
+    end
+
+    stored = auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
+    assert_equal 404, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"), error.message
+    assert_equal second_user.fetch("id"), stored.fetch("userId")
+  end
+
+  def test_update_rechecks_owner_during_final_mutation
+    auth = build_auth
+    first_cookie = sign_up_cookie(auth, email: "first-update-race-route@example.com")
+    second_cookie = sign_up_cookie(auth, email: "second-update-race-route@example.com")
+    first_user = auth.api.get_session(headers: {"cookie" => first_cookie})[:user]
+    second_user = auth.api.get_session(headers: {"cookie" => second_cookie})[:user]
+    passkey = create_passkey(auth, user_id: first_user.fetch("id"), name: "Original race", credential_id: "update-race-route")
+    adapter = auth.context.adapter
+    original_find_one = adapter.method(:find_one)
+    transferred = false
+
+    error = assert_raises(BetterAuth::APIError) do
+      adapter.stub(:find_one, lambda { |**kwargs|
+        result = original_find_one.call(**kwargs)
+        if !transferred && passkey_lookup?(kwargs, passkey.fetch("id"), first_user.fetch("id")) && result
+          transferred = true
+          adapter.update(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}], update: {userId: second_user.fetch("id")})
+        end
+        result
+      }) do
+        auth.api.update_passkey(headers: {"cookie" => first_cookie}, body: {id: passkey.fetch("id"), name: "Changed race"})
+      end
+    end
+
+    stored = auth.context.adapter.find_one(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
+    assert_equal 404, error.status_code
+    assert_equal BetterAuth::Plugins::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND"), error.message
+    assert_equal second_user.fetch("id"), stored.fetch("userId")
+    assert_equal "Original race", stored.fetch("name")
+  end
+
+  private
+
+  def passkey_lookup?(kwargs, id, user_id)
+    return false unless kwargs[:model].to_s == "passkey"
+
+    where = kwargs[:where] || []
+    where.any? { |condition| condition[:field] == "id" && condition[:value] == id } &&
+      where.any? { |condition| condition[:field] == "userId" && condition[:value] == user_id }
+  end
 end

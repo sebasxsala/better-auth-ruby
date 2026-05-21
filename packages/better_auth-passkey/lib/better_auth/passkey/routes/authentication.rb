@@ -78,7 +78,7 @@ module BetterAuth
               updated_passkey = ctx.context.adapter.update(
                 model: "passkey",
                 where: [{field: "id", value: passkey.fetch("id")}],
-                update: {counter: credential.sign_count}
+                update: {counter: credential.sign_count.to_i}
               )
               unless updated_passkey
                 raise APIError.new("BAD_REQUEST", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("AUTHENTICATION_FAILED"))

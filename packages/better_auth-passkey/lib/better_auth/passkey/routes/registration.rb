@@ -95,7 +95,7 @@ module BetterAuth
                   userId: target_user_id,
                   credentialID: credential.id,
                   publicKey: Base64.strict_encode64(credential.public_key),
-                  counter: credential.sign_count,
+                  counter: credential.sign_count.to_i,
                   deviceType: authenticator_data&.credential_backup_eligible? ? "multiDevice" : "singleDevice",
                   backedUp: authenticator_data&.credential_backed_up? || false,
                   transports: Array(Credentials.attestation_response(credential)&.transports).join(","),

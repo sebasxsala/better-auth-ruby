@@ -127,7 +127,7 @@ The Ruby plugin tracks Better Auth `v1.6.9` upstream behavior. A few wire-shape 
 - `rp_id` resolution falls back to `URI.parse(base_url).host` (port stripped). When `base_url` is empty or unparseable, `rp_id` defaults to `"localhost"`.
 - For passkey-first registration, the `after_verification` callback may return `{ user_id: nil }` or `{ user_id: "" }` to leave the resolved user unchanged. Returning any other non-empty-string value (integer, boolean, etc.) raises `RESOLVED_USER_INVALID`.
 - `update_passkey` accepts an empty-string `name` to match upstream `z.string()`. Missing or non-string `name` still raises `VALIDATION_ERROR`.
-- Cross-user `delete_passkey` raises `UNAUTHORIZED` with the `PASSKEY_NOT_FOUND` message, mirroring upstream's `requireResourceOwnership` middleware behavior when only `notFoundError` is configured.
+- Cross-user `delete_passkey` and `update_passkey` raise `NOT_FOUND` with the `PASSKEY_NOT_FOUND` message. This is an intentional Ruby hardening to avoid user/passkey enumeration while preserving the upstream error message.
 - Existing databases should deduplicate historical `credential_id` values before adding the unique constraint during migration.
 
 ## Notes

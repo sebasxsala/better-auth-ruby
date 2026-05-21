@@ -28,7 +28,15 @@ module BetterAuth
             )
             raise APIError.new("NOT_FOUND", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless passkey
 
-            ctx.context.adapter.delete(model: "passkey", where: [{field: "id", value: passkey.fetch("id")}])
+            deleted = ctx.context.adapter.delete_many(
+              model: "passkey",
+              where: [
+                {field: "id", value: passkey.fetch("id")},
+                {field: "userId", value: session.fetch(:user).fetch("id")}
+              ]
+            )
+            raise APIError.new("NOT_FOUND", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) if deleted.to_i.zero?
+
             ctx.json({status: true})
           end
         end
@@ -53,10 +61,13 @@ module BetterAuth
 
             updated = ctx.context.adapter.update(
               model: "passkey",
-              where: [{field: "id", value: body[:id]}],
+              where: [
+                {field: "id", value: body[:id]},
+                {field: "userId", value: session.fetch(:user).fetch("id")}
+              ],
               update: {name: body[:name].to_s}
             )
-            raise APIError.new("INTERNAL_SERVER_ERROR", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("FAILED_TO_UPDATE_PASSKEY")) unless updated
+            raise APIError.new("NOT_FOUND", message: ErrorCodes::PASSKEY_ERROR_CODES.fetch("PASSKEY_NOT_FOUND")) unless updated
 
             ctx.json({passkey: Credentials.wire(updated)})
           end

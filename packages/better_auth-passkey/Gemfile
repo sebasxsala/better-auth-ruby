@@ -9,7 +9,13 @@ gem "better_auth", path: "../better_auth"
 gemspec name: "better_auth-passkey"
 
 group :development, :test do
+  gem "better_auth-mongodb", path: "../better_auth-mongodb"
   gem "minitest", "~> 5.25"
+  gem "mysql2", "~> 0.5"
+  gem "pg", "~> 1.5"
   gem "rake", "~> 13.2"
+  gem "sequel", "~> 5.83"
+  gem "sqlite3", "~> 2.0"
   gem "standardrb", "~> 1.0"
+  gem "tiny_tds", "~> 2.1"
 end
