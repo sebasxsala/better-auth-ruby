@@ -4,6 +4,10 @@
 
 - Rename the canonical Ruby gem to `better_auth-mongodb` while keeping
   `better_auth-mongo-adapter` as a deprecated compatibility package.
+- Fixed `use_plural: true` so configured schema `model_name` values such as
+  `people` and `api_keys` are used directly instead of being pluralized again.
+- Clarified MongoDB filter docs: `in` requires array values, while `not_in`
+  accepts scalar values as a Ruby adapter-family compatibility behavior.
 
 ## 0.7.0 - 2026-05-05
 
@@ -12,7 +16,7 @@
 - Consolidated Mongo fake test support and strengthened transaction rollback coverage for staged mutations.
 - Apply `advanced[:database][:default_find_many_limit]` to uncapped `find_many` calls and one-to-many Mongo `$lookup` joins, defaulting to 100 when omitted.
 - Match upstream Mongo where-clause semantics for mixed connectors by bucketing multi-clause filters into `$and` and `$or` arrays instead of left-fold nesting.
-- Allow scalar values for `in` and `not_in` filters as an intentional Ruby adapter-family adaptation.
+- Allow scalar values for `not_in` filters as an intentional Ruby adapter-family adaptation while keeping `in` aligned with the shared adapter array contract.
 
 ## 0.1.1 - 2026-04-30
 
