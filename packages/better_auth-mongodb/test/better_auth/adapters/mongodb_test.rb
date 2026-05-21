@@ -27,7 +27,8 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
           modelName: "profiles",
           fields: {
             ownerId: {type: "string", required: true, fieldName: "owner_ref", references: {model: "user", field: "id"}, index: true},
-            handle: {type: "string", required: true, fieldName: "profile_handle", unique: true}
+            handle: {type: "string", required: true, fieldName: "profile_handle", unique: true},
+            externalId: {type: "string", required: false, fieldName: "external_id", unique: true}
           }
         }
       }
@@ -54,10 +55,12 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_includes summary, {collection: "rateLimit", field: "key", keys: {"key" => 1}, unique: true}
     assert_includes summary, {collection: "profiles", field: "ownerId", keys: {"owner_ref" => 1}, unique: false}
     assert_includes summary, {collection: "profiles", field: "handle", keys: {"profile_handle" => 1}, unique: true}
+    assert_includes summary, {collection: "profiles", field: "externalId", keys: {"external_id" => 1}, unique: true}
     refute summary.any? { |entry| entry.fetch(:keys).key?("_id") }
     assert_equal [[{"email_address" => 1}, {unique: true}]], @database.collection("people").indexes.create_one_calls
     assert_includes @database.collection("profiles").indexes.create_one_calls, [{"owner_ref" => 1}, {}]
     assert_includes @database.collection("profiles").indexes.create_one_calls, [{"profile_handle" => 1}, {unique: true}]
+    assert_includes @database.collection("profiles").indexes.create_one_calls, [{"external_id" => 1}, {unique: true, sparse: true}]
   end
 
   def test_mongodb_adapter_maps_id_to_bson_id_and_returns_logical_fields
@@ -452,6 +455,73 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     client&.close
   end
 
+  def test_mongodb_adapter_persists_social_callback_and_get_session_reads_database_rows
+    require "mongo"
+
+    client = real_mongo_client("better-auth-ruby-social-test")
+    drop_real_database(client)
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: ->(options) { BetterAuth::Adapters::MongoDB.new(options, database: client.database, client: client, transaction: false) },
+      session: {cookie_cache: {enabled: false}},
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: lambda do |data|
+            "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}"
+          end,
+          validate_authorization_code: ->(_data) { {accessToken: "github-access"} },
+          get_user_info: ->(_tokens) {
+            {
+              user: {
+                id: 123_456_789,
+                email: "mongodb-social@example.com",
+                name: "MongoDB Social",
+                emailVerified: true
+              }
+            }
+          }
+        }
+      }
+    )
+
+    sign_in_status, _sign_in_headers, sign_in_body = auth.api.sign_in_social(
+      body: {provider: "github", callbackURL: "/dashboard", newUserCallbackURL: "/welcome"},
+      as_response: true
+    )
+    sign_in_payload = JSON.parse(sign_in_body.join)
+    state = URI.decode_www_form(URI.parse(sign_in_payload.fetch("url")).query).assoc("state").last
+
+    assert_equal 200, sign_in_status
+
+    callback_status, callback_headers, = auth.api.callback_oauth(
+      params: {providerId: "github"},
+      query: {code: "oauth-code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, callback_status
+    assert_equal "/welcome", callback_headers.fetch("location")
+
+    session = auth.api.get_session(headers: {"cookie" => cookie_header(callback_headers.fetch("set-cookie"))})
+    user = session.fetch(:user)
+    accounts = auth.context.internal_adapter.find_accounts(user.fetch("id"))
+
+    assert_equal "mongodb-social@example.com", user.fetch("email")
+    assert_equal user.fetch("id"), session.fetch(:session).fetch("userId")
+    assert_equal "mongodb-social@example.com", client.database.collection("user").find(_id: mongo_object_id(user.fetch("id"))).first.fetch("email")
+    assert_equal mongo_object_id(user.fetch("id")), client.database.collection("account").find(provider_id: "github").first.fetch("user_id")
+    assert_equal 1, accounts.length
+    assert_equal "123456789", accounts.first.fetch("accountId")
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
+  ensure
+    client&.close
+  end
+
   def test_mongodb_adapter_real_mongo_native_update_delete_count_and_object_id_update
     require "mongo"
 
@@ -475,6 +545,71 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal 2, adapter.update_many(model: "user", where: [{field: "email", operator: "ends_with", value: "native@example.com"}], update: {emailVerified: true})
     assert_equal 2, adapter.delete_many(model: "user", where: [{field: "emailVerified", value: true}])
     assert_equal 0, adapter.count(model: "user")
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
+  ensure
+    client&.close
+  end
+
+  def test_mongodb_adapter_real_mongo_optional_unique_indexes_allow_missing_values
+    require "mongo"
+
+    plugin = {
+      id: "optional-unique",
+      schema: {
+        user: {
+          fields: {
+            username: {type: "string", required: false, unique: true}
+          }
+        }
+      }
+    }
+    client = real_mongo_client("better-auth-ruby-optional-unique-test")
+    drop_real_database(client)
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: client.database, client: client, transaction: false)
+    adapter.ensure_indexes!
+
+    first = adapter.create(model: "user", data: {name: "First", email: "first-optional@example.com"})
+    second = adapter.create(model: "user", data: {name: "Second", email: "second-optional@example.com"})
+
+    assert_equal "First", first.fetch("name")
+    assert_equal "Second", second.fetch("name")
+    username_index = client.database.collection("user").indexes.to_a.find { |index| index.fetch("name") == "username_1" }
+    assert_equal true, username_index.fetch("sparse")
+  rescue LoadError
+    skip "mongo gem is not installed"
+  rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError
+    skip "MongoDB test service is not available"
+  ensure
+    client&.close
+  end
+
+  def test_mongodb_adapter_real_mongo_repairs_existing_optional_unique_indexes
+    require "mongo"
+
+    plugin = {
+      id: "optional-unique",
+      schema: {
+        user: {
+          fields: {
+            username: {type: "string", required: false, unique: true}
+          }
+        }
+      }
+    }
+    client = real_mongo_client("better-auth-ruby-optional-unique-repair-test")
+    drop_real_database(client)
+    client.database.collection("user").indexes.create_one({"username" => 1}, unique: true)
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: client.database, client: client, transaction: false)
+
+    adapter.ensure_indexes!
+
+    username_index = client.database.collection("user").indexes.to_a.find { |index| index.fetch("name") == "username_1" }
+    assert_equal true, username_index.fetch("sparse")
   rescue LoadError
     skip "mongo gem is not installed"
   rescue Mongo::Error::NoServerAvailable, Mongo::Error::SocketError

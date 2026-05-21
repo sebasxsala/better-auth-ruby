@@ -119,8 +119,8 @@ module BetterAuth
 
             collection = collection_for(model)
             key = storage_field(model, field)
-            index_options = attributes[:unique] ? {unique: true} : {}
-            collection.indexes.create_one({key => 1}, index_options)
+            index_options = index_options_for(attributes)
+            create_index!(collection, {key => 1}, index_options)
             {
               collection: collection_name(model),
               field: field,
@@ -150,6 +150,34 @@ module BetterAuth
       end
 
       private
+
+      def index_options_for(attributes)
+        return {} unless attributes[:unique]
+
+        options = {unique: true}
+        options[:sparse] = true unless attributes[:required]
+        options
+      end
+
+      def create_index!(collection, keys, options)
+        collection.indexes.create_one(keys, options)
+      rescue Mongo::Error::OperationFailure => error
+        raise unless index_options_conflict?(error) && collection.indexes.respond_to?(:drop_one)
+
+        collection.indexes.drop_one(default_index_name(keys))
+        collection.indexes.create_one(keys, options)
+      end
+
+      def index_options_conflict?(error)
+        error.message.include?("IndexOptionsConflict") ||
+          error.message.include?("IndexKeySpecsConflict") ||
+          error.message.include?("already exists with different options") ||
+          error.message.include?("same name as the requested index")
+      end
+
+      def default_index_name(keys)
+        keys.map { |field, direction| "#{field}_#{direction}" }.join("_")
+      end
 
       def transform_input(model, data, action, force_allow_id)
         fields = fields_for(model)
