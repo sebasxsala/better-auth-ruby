@@ -7,7 +7,7 @@ require "rack/response"
 
 module BetterAuthExamples
   class DashboardApp
-    DASHBOARD_VIEWS = %w[home sessions social plugins database settings].freeze
+    DASHBOARD_VIEWS = %w[home users sessions social plugins database settings].freeze
     DASHBOARD_PATHS = DASHBOARD_VIEWS.to_h do |view|
       [view, (view == "home") ? "/" : "/#{view}"]
     end.freeze
@@ -38,6 +38,14 @@ module BetterAuthExamples
             offset: request.params["offset"]
           ).merge(settings: settings)
         )
+      when ["GET", "/example/users"]
+        settings = Settings.from_request(request)
+        json_response({users: ExampleSeeder.users_for_dashboard(registry.auth_for(settings)), settings: settings})
+      when ["POST", "/example/users/sign-in"]
+        sign_in_seeded_user(request)
+      when ["GET", "/example/organizations"]
+        settings = Settings.from_request(request)
+        json_response({organizations: ExampleSeeder.organizations_for_dashboard(registry.auth_for(settings)), settings: settings})
       when ["POST", "/example/database/delete"]
         delete_records(request)
       when ["GET", "/example/plugins"]
@@ -61,6 +69,8 @@ module BetterAuthExamples
         json_response({providers: SocialProviderCatalog.metadata})
       when ["POST", "/example/reset"]
         reset_database(request)
+      when ["POST", "/example/reset-and-seed"]
+        reset_and_seed_database(request)
       else
         not_found
       end
@@ -95,6 +105,32 @@ module BetterAuthExamples
         {ok: true, settings: settings},
         headers: {"set-cookie" => Settings.clear_auth_cookie_headers(request).join("\n")}
       )
+    end
+
+    def reset_and_seed_database(request)
+      settings = Settings.from_request(request)
+      result = ExampleSeeder.reset_and_seed!(registry, settings)
+      json_response(
+        {ok: true, settings: settings}.merge(result),
+        headers: {"set-cookie" => Settings.clear_auth_cookie_headers(request).join("\n")}
+      )
+    end
+
+    def sign_in_seeded_user(request)
+      settings = Settings.from_request(request)
+      body = parsed_body(request)
+      user_id = body["user_id"] || body[:user_id] || body["userId"] || body[:userId]
+      auth = registry.auth_for(settings)
+      user = auth.context.internal_adapter.find_user_by_id(user_id)
+      return json_response({error: "Seeded user not found."}, status: 404) unless user
+
+      response = auth.api.sign_in_email(
+        body: {email: user.fetch("email"), password: ExampleSeeder::PASSWORD},
+        return_headers: true
+      )
+      headers = response.fetch(:headers) { response.fetch("headers", {}) }
+      payload = response.fetch(:response) { response.fetch("response", {}) }
+      json_response({ok: true, user: payload[:user] || payload["user"] || user}, headers: {"set-cookie" => headers["set-cookie"].to_s})
     end
 
     def delete_records(request)
@@ -203,11 +239,11 @@ module BetterAuthExamples
           button { -webkit-tap-highlight-color: transparent; }
           textarea { width: 100%; min-width: 0; }
           .shell { display: grid; grid-template-columns: 246px minmax(0, 1fr); min-height: 100dvh; background: var(--bg); }
-          .sidebar { border-right: 1px solid var(--line); background: var(--sidebar); padding: 18px 12px; position: sticky; top: 0; height: 100dvh; }
+          .sidebar { border-right: 1px solid var(--line); background: var(--sidebar); padding: 18px 12px; position: sticky; top: 0; height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; }
           .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; margin: 0 8px 3px; color: var(--text); }
           .brand-mark { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: oklch(0.98 0.005 275); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; box-shadow: inset 0 1px 0 oklch(1 0 0 / .18); }
           .framework { color: var(--muted); font-size: 12px; margin: 0 8px 24px 46px; }
-          .nav { display: grid; gap: 3px; }
+          .nav { display: grid; gap: 3px; align-content: start; min-height: 0; overflow: auto; }
           .nav button {
             border: 1px solid transparent;
             background: transparent;
@@ -294,6 +330,13 @@ module BetterAuthExamples
           .avatar { width: 42px; height: 42px; border-radius: 50%; background: var(--panel-2); display: inline-grid; place-items: center; overflow: hidden; border: 1px solid var(--line); font-weight: 650; }
           .avatar img { width: 100%; height: 100%; object-fit: cover; }
           .profile { display: flex; align-items: center; gap: 12px; }
+          .sidebar-profile { margin-top: 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 10px; min-width: 0; color: var(--muted); }
+          .sidebar-profile .profile { gap: 10px; min-width: 0; }
+          .sidebar-profile .avatar { width: 34px; height: 34px; font-size: 12px; flex: 0 0 auto; }
+          .sidebar-profile strong, .sidebar-profile .muted { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sidebar-profile strong { color: var(--text); font-size: 13px; line-height: 1.25; }
+          .sidebar-profile .muted { font-size: 12px; line-height: 1.35; }
+          .sidebar-empty-user { color: var(--soft); font-size: 12px; line-height: 1.35; }
           .muted { color: var(--muted); }
           pre { margin: 0; white-space: pre-wrap; overflow: auto; max-height: 280px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 11px; font: 12px/1.55 var(--mono); }
           .database-studio { display: grid; grid-template-columns: 286px minmax(0, 1fr); height: calc(100dvh - 124px); min-height: 420px; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: inset 0 1px 0 oklch(1 0 0 / .025); }
@@ -406,6 +449,13 @@ module BetterAuthExamples
           .delivery-list { display: grid; gap: 8px; }
           .delivery-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--surface); }
           .plugin-title { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-weight: 620; }
+          .user-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+          .user-table-wrap table { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+          .user-table-wrap th, .user-table-wrap td { max-width: 280px; }
+          .user-orgs { display: flex; gap: 6px; flex-wrap: wrap; }
+          .user-org-pill { border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; color: var(--muted); background: var(--panel); white-space: nowrap; }
+          .organization-toolbar { display: grid; grid-template-columns: minmax(240px, 360px) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+          .organization-summary { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--muted); }
           .social-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
           .social-button { min-height: 42px; justify-content: flex-start; }
           .notice { min-height: 20px; color: var(--muted); margin: 10px 0 0; }
@@ -419,12 +469,13 @@ module BetterAuthExamples
           [hidden] { display: none !important; }
           @media (max-width: 840px) {
             .shell { grid-template-columns: 1fr; }
-            .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+            .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); grid-template-rows: auto auto auto auto; }
             .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .sidebar-profile { margin: 12px 0 0; }
             .two { grid-template-columns: 1fr; }
             .topbar { position: static; padding: 14px 16px; }
             .grid { padding: 16px; }
-            .plugins-toolbar, .plugin-filter-bar, .plugin-heading, .endpoint-line { grid-template-columns: 1fr; display: grid; }
+            .plugins-toolbar, .plugin-filter-bar, .plugin-heading, .endpoint-line, .organization-toolbar { grid-template-columns: 1fr; display: grid; }
             .plugin-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .plugin-summary { justify-content: flex-start; }
             .database-studio { grid-template-columns: 1fr; height: auto; }
@@ -440,12 +491,15 @@ module BetterAuthExamples
             <p class="framework"><%= framework_name %> example</p>
             <nav class="nav">
               <button data-view-button="home" class="active"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg></span>Home</button>
+              <button data-view-button="users"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>Users</button>
+              <button data-view-button="organizations"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/></svg></span>Organizations</button>
               <button data-view-button="sessions"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>Sessions</button>
               <button data-view-button="social"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="16" r="3"/><path d="m10.2 10.2 3.6 3.6M16 5v5M19 8h-6M5 16h6M8 13v6"/></svg></span>Social</button>
               <button data-view-button="plugins"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m12 2 2.4 6.8 7.2.2-5.7 4.4 2 7-5.9-4-5.9 4 2-7L2.4 9l7.2-.2L12 2Z"/></svg></span>Plugins</button>
               <button data-view-button="database"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7c0 1.7 3.6 3 8 3s8-1.3 8-3-3.6-3-8-3-8 1.3-8 3Z"/><path d="M4 7v5c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5"/></svg></span>Database</button>
               <button data-view-button="settings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 3.1h5l.4-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg></span>Settings</button>
             </nav>
+            <div id="sidebar-profile" class="sidebar-profile"><span class="sidebar-empty-user">No active session.</span></div>
           </aside>
           <main>
             <div class="topbar">
@@ -493,6 +547,31 @@ module BetterAuthExamples
                   <button class="button primary" type="submit">Sign in</button>
                 </form>
               </div>
+            </section>
+
+            <section data-view="users" hidden class="grid">
+              <div class="panel">
+                <div class="actions">
+                  <button class="button" id="load-users" type="button">Reload users</button>
+                  <button class="button danger" id="seed-db" type="button">Drop, migrate and seed</button>
+                </div>
+                <p class="notice" id="users-notice"></p>
+              </div>
+              <div class="user-table-wrap" id="users-table"></div>
+            </section>
+
+            <section data-view="organizations" hidden class="grid">
+              <div class="panel">
+                <div class="organization-toolbar">
+                  <label>Organization
+                    <select id="organization-select"></select>
+                  </label>
+                  <div class="organization-summary" id="organization-summary"></div>
+                  <button class="button" id="load-organizations" type="button">Reload organizations</button>
+                </div>
+                <p class="notice" id="organizations-notice"></p>
+              </div>
+              <div class="user-table-wrap" id="organization-members-table"></div>
             </section>
 
             <section data-view="sessions" hidden class="grid">
@@ -570,7 +649,10 @@ module BetterAuthExamples
                     </div>
                     <div class="table-tabs" id="table-tabs"></div>
                   </div>
-                  <button class="button danger" id="drop-db" type="button">Drop and migrate database</button>
+                  <div class="actions">
+                    <button class="button danger" id="drop-db" type="button">Drop and migrate database</button>
+                    <button class="button danger" id="seed-db-rail" type="button">Drop, migrate and seed</button>
+                  </div>
                   <p class="notice" id="db-notice"></p>
                 </aside>
                 <div class="database-main">
@@ -648,10 +730,20 @@ module BetterAuthExamples
             </div>
           </div>
         </dialog>
+        <dialog id="seed-dialog">
+          <div class="dialog-body">
+            <p class="dialog-title">Drop, migrate and seed database?</p>
+            <p>This removes Better Auth data for the selected provider, runs schema setup, creates example users, organizations, memberships, and representative plugin records.</p>
+            <div class="actions">
+              <button class="button danger" id="confirm-seed-db" type="button">Drop, migrate and seed</button>
+              <button class="button" id="cancel-seed-db" type="button">Cancel</button>
+            </div>
+          </div>
+        </dialog>
         <script>
-          const state = { settings: {}, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50, plugins: [], availablePlugins: [], activePlugin: "all", pluginQuery: "", deliveries: [], excludedPlugins: [] };
+          const state = { settings: {}, users: [], organizations: [], activeOrganizationId: null, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50, plugins: [], availablePlugins: [], activePlugin: "all", pluginQuery: "", deliveries: [], excludedPlugins: [] };
           const SETTINGS_STORAGE_KEY = "better_auth_example_settings";
-          const VIEW_PATHS = { home: "/", sessions: "/sessions", social: "/social", plugins: "/plugins", database: "/database", settings: "/settings" };
+          const VIEW_PATHS = { home: "/", users: "/users", organizations: "/organizations", sessions: "/sessions", social: "/social", plugins: "/plugins", database: "/database", settings: "/settings" };
           const PATH_VIEWS = Object.fromEntries(Object.entries(VIEW_PATHS).map(([view, path]) => [path, view]));
           const $ = (selector) => document.querySelector(selector);
           const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -748,6 +840,8 @@ module BetterAuthExamples
             $$("[data-view-button]").forEach((el) => el.classList.toggle("active", el.dataset.viewButton === nextView));
             $("#view-title").textContent = nextView[0].toUpperCase() + nextView.slice(1);
             if (shouldSyncURL) syncURL(nextView, urlMode);
+            if (nextView === "users") loadUsers();
+            if (nextView === "organizations") loadOrganizations();
             if (nextView === "database") loadDatabase();
             if (nextView === "plugins") loadPlugins();
           }
@@ -767,12 +861,17 @@ module BetterAuthExamples
           function renderProfile(session) {
             if (!session || !session.user) {
               $("#profile").innerHTML = "No active session.";
+              $("#sidebar-profile").innerHTML = `<span class="sidebar-empty-user">No active session.</span>`;
               return;
             }
             const user = session.user;
             const initials = (user.name || user.email || "?").split(/\\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
             const avatar = user.image ? `<img src="${escapeHTML(user.image)}" alt="">` : escapeHTML(initials);
-            $("#profile").innerHTML = `<div class="profile"><span class="avatar">${avatar}</span><div><strong>${escapeHTML(user.name || "Unnamed user")}</strong><div class="muted">${escapeHTML(user.email || "")}</div></div></div>`;
+            const primary = user.name || user.username || user.email || "Unnamed user";
+            const secondary = [user.email, user.username && `@${user.username}`].filter(Boolean).join(" · ");
+            const profile = `<div class="profile"><span class="avatar">${avatar}</span><div><strong>${escapeHTML(primary)}</strong><div class="muted">${escapeHTML(secondary)}</div></div></div>`;
+            $("#profile").innerHTML = profile;
+            $("#sidebar-profile").innerHTML = profile;
           }
 
           async function loadSettings() {
@@ -807,6 +906,110 @@ module BetterAuthExamples
               $("#sessions-json").textContent = JSON.stringify(sessions, null, 2);
             } catch (error) {
               $("#sessions-json").textContent = JSON.stringify({ error: error.message }, null, 2);
+            }
+          }
+
+          function renderUsers() {
+            if (!state.users.length) {
+              $("#users-table").innerHTML = `<div class="empty-state">No users found. Seed the database to create test accounts.</div>`;
+              return;
+            }
+            const rows = state.users.map((user) => {
+              const orgs = (user.organizations || []).length
+                ? `<div class="user-orgs">${user.organizations.map((org) => `<span class="user-org-pill">${escapeHTML(org.name || org.slug || org.id)} · ${escapeHTML(org.role || "member")}</span>`).join("")}</div>`
+                : `<span class="muted">No organization</span>`;
+              return `<tr>
+                <td><strong>${escapeHTML(user.name || "Unnamed")}</strong><div class="muted">${escapeHTML(user.id)}</div></td>
+                <td>${escapeHTML(user.email || "")}</td>
+                <td>${escapeHTML(user.role || "user")}</td>
+                <td>${orgs}</td>
+                <td><button class="button" type="button" data-sign-in-user="${escapeHTML(user.id)}">Sign in</button></td>
+              </tr>`;
+            }).join("");
+            $("#users-table").innerHTML = `<table>
+              <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Organizations</th><th>Session</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`;
+            $$("[data-sign-in-user]").forEach((button) => {
+              button.onclick = () => signInAsUser(button.dataset.signInUser);
+            });
+          }
+
+          async function loadUsers() {
+            showNotice("#users-notice", "Loading users...");
+            try {
+              const data = await jsonFetch("/example/users");
+              state.users = data.users || [];
+              renderUsers();
+              showNotice("#users-notice", "Users loaded.", "ok");
+            } catch (error) {
+              state.users = [];
+              renderUsers();
+              showNotice("#users-notice", error.message, "error");
+            }
+          }
+
+          async function signInAsUser(userId) {
+            showNotice("#users-notice", "Signing in...");
+            try {
+              await jsonFetch("/example/users/sign-in", { method: "POST", body: JSON.stringify({user_id: userId}) });
+              showNotice("#users-notice", "Signed in as selected user.", "ok");
+              await loadCurrentSession();
+              await loadSessions();
+            } catch (error) {
+              showNotice("#users-notice", error.message, "error");
+            }
+          }
+
+          function renderOrganizations() {
+            const select = $("#organization-select");
+            select.innerHTML = state.organizations.map((organization) => (
+              `<option value="${escapeHTML(organization.id)}">${escapeHTML(organization.name || organization.slug || organization.id)}</option>`
+            )).join("");
+            const selected = state.organizations.find((organization) => organization.id === state.activeOrganizationId) || state.organizations[0];
+            if (!selected) {
+              state.activeOrganizationId = null;
+              $("#organization-summary").innerHTML = "";
+              $("#organization-members-table").innerHTML = `<div class="empty-state">No organizations found. Seed the database to create organization fixtures.</div>`;
+              return;
+            }
+
+            state.activeOrganizationId = selected.id;
+            select.value = selected.id;
+            const members = selected.members || [];
+            $("#organization-summary").innerHTML = `
+              <span class="pill">${escapeHTML(selected.slug || "no-slug")}</span>
+              <span class="pill">${escapeHTML(members.length)} members</span>
+            `;
+            const rows = members.map((member) => (
+              `<tr>
+                <td><strong>${escapeHTML(member.name || "Unnamed")}</strong><div class="muted">${escapeHTML(member.user_id || "")}</div></td>
+                <td>${escapeHTML(member.email || "")}</td>
+                <td>${escapeHTML(member.username ? `@${member.username}` : "")}</td>
+                <td>${escapeHTML(member.role || "member")}</td>
+                <td>${escapeHTML(member.global_role || "user")}</td>
+              </tr>`
+            )).join("");
+            $("#organization-members-table").innerHTML = `<table>
+              <thead><tr><th>User</th><th>Email</th><th>Username</th><th>Organization role</th><th>Global role</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="5" class="empty-row">This organization has no members.</td></tr>`}</tbody>
+            </table>`;
+          }
+
+          async function loadOrganizations() {
+            showNotice("#organizations-notice", "Loading organizations...");
+            try {
+              const data = await jsonFetch("/example/organizations");
+              const previous = state.activeOrganizationId;
+              state.organizations = data.organizations || [];
+              state.activeOrganizationId = state.organizations.some((organization) => organization.id === previous) ? previous : (state.organizations[0] && state.organizations[0].id);
+              renderOrganizations();
+              showNotice("#organizations-notice", "Organizations loaded.", "ok");
+            } catch (error) {
+              state.organizations = [];
+              state.activeOrganizationId = null;
+              renderOrganizations();
+              showNotice("#organizations-notice", error.message, "error");
             }
           }
 
@@ -1236,6 +1439,7 @@ module BetterAuthExamples
 
           async function refreshCurrentView() {
             await boot();
+            if (!$("[data-view='organizations']").hidden) await loadOrganizations();
             if (!$("[data-view='database']").hidden) await loadDatabase();
           }
 
@@ -1247,6 +1451,7 @@ module BetterAuthExamples
             showNotice(noticeSelector, data.auth_cookies_cleared ? "Settings applied. Session cookies were cleared." : "Settings applied.", "ok");
             await loadCurrentSession();
             await loadSessions();
+            if (!$("[data-view='organizations']").hidden) await loadOrganizations();
             if (!$("[data-view='database']").hidden) await loadDatabase();
           }
 
@@ -1255,6 +1460,12 @@ module BetterAuthExamples
           $("#refresh-all").onclick = refreshCurrentView;
           $("#load-session").onclick = loadCurrentSession;
           $("#load-sessions").onclick = loadSessions;
+          $("#load-users").onclick = loadUsers;
+          $("#load-organizations").onclick = loadOrganizations;
+          $("#organization-select").onchange = (event) => {
+            state.activeOrganizationId = event.currentTarget.value;
+            renderOrganizations();
+          };
           $$("[data-social-provider]").forEach((button) => button.onclick = () => signInWithSocialProvider(button));
           $("#load-plugins").onclick = loadPlugins;
           $("#clear-deliveries").onclick = async () => {
@@ -1350,6 +1561,9 @@ module BetterAuthExamples
 
           $("#drop-db").onclick = () => $("#drop-dialog").showModal();
           $("#cancel-drop-db").onclick = () => $("#drop-dialog").close();
+          $("#seed-db").onclick = () => $("#seed-dialog").showModal();
+          $("#seed-db-rail").onclick = () => $("#seed-dialog").showModal();
+          $("#cancel-seed-db").onclick = () => $("#seed-dialog").close();
 
           $("#confirm-drop-db").onclick = async () => {
             $("#drop-dialog").close();
@@ -1360,6 +1574,24 @@ module BetterAuthExamples
               await loadSessions();
               await loadDatabase();
             } catch (error) {
+              showNotice("#db-notice", error.message, "error");
+            }
+          };
+
+          $("#confirm-seed-db").onclick = async () => {
+            $("#seed-dialog").close();
+            try {
+              const data = await jsonFetch("/example/reset-and-seed", { method: "POST", body: "{}" });
+              state.users = data.users || [];
+              renderUsers();
+              if (!$("[data-view='organizations']").hidden) await loadOrganizations();
+              showNotice("#users-notice", `Seeded ${state.users.length} users.`, "ok");
+              showNotice("#db-notice", "Database reset, migrated and seeded.", "ok");
+              await loadCurrentSession();
+              await loadSessions();
+              if (!$("[data-view='database']").hidden) await loadDatabase();
+            } catch (error) {
+              showNotice("#users-notice", error.message, "error");
               showNotice("#db-notice", error.message, "error");
             }
           };

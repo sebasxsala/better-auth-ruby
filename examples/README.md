@@ -86,9 +86,13 @@ The dashboard provides:
 - Email/password sign up, sign in, and sign out.
 - Current user display with avatar, name, and email.
 - `get-session` and `list-sessions` viewers.
+- Seeded users view with quick sign-in for admin, normal users, and
+  organization members.
+- Organization view with a dropdown to switch between one organization at a
+  time and inspect its members, emails, and roles.
 - Database explorer with tables/collections, columns, row counts, column filters,
   record scrolling, and reload.
-- Drop-and-migrate for the selected provider.
+- Drop-and-migrate, plus drop-migrate-and-seed for the selected provider.
 - Runtime database provider switching.
 - Runtime rate-limit adapter switching between memory and Redis.
 
@@ -105,6 +109,14 @@ provider, then recreates schema:
 - MongoDB drops Better Auth collections and recreates indexes.
 - Memory mode invalidates the in-process auth instance.
 - SQLite uses a local file under the example app `tmp/` directory.
+
+The seed button performs the same reset and then creates local test data:
+example users, an admin user, organizations, organization memberships and
+representative plugin records for API key, device authorization, JWT/JWKS, SSO,
+OAuth/OIDC provider tables, SCIM, passkey, SIWE wallet addresses, Stripe
+subscriptions, and two-factor tables where the enabled plugin schema is
+available. All seeded email users use `password123` so the dashboard can switch
+sessions quickly.
 
 ## Notes
 

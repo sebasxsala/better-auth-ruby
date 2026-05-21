@@ -45,12 +45,17 @@ class BetterAuthExamplesTest < Minitest::Test
     assert_includes response.body, "grid-template-rows: auto auto minmax(0, 1fr)"
     assert_includes response.body, "<div class=\"toolbar-right\">"
     assert_includes response.body, "<div class=\"pager\">"
+    assert_includes response.body, "id=\"sidebar-profile\""
+    assert_includes response.body, "$(\"#sidebar-profile\").innerHTML = profile"
     assert_includes response.body, "loadDatabase({preserveTable: true, preservePage: true})"
     assert_includes response.body, "`/example/database?${params.toString()}`"
     assert_includes response.body, "function renderPluginSections()"
     assert_includes response.body, "$(\"#plugin-filter\").oninput"
     assert_includes response.body, "data-plugin-toggle"
     assert_includes response.body, "function setPluginEnabled"
+    assert_includes response.body, "data-view-button=\"organizations\""
+    assert_includes response.body, "id=\"organization-select\""
+    assert_includes response.body, "function renderOrganizations()"
   end
 
   def test_dashboard_routes_restore_view_and_plugin_filters_from_url
@@ -64,7 +69,7 @@ class BetterAuthExamplesTest < Minitest::Test
     response = Rack::MockRequest.new(app).get("/plugins?plugin=admin&q=email")
 
     assert_equal 200, response.status
-    assert_includes response.body, "const VIEW_PATHS = { home: \"/\", sessions: \"/sessions\", social: \"/social\", plugins: \"/plugins\", database: \"/database\", settings: \"/settings\" }"
+    assert_includes response.body, "const VIEW_PATHS = { home: \"/\", users: \"/users\", organizations: \"/organizations\", sessions: \"/sessions\", social: \"/social\", plugins: \"/plugins\", database: \"/database\", settings: \"/settings\" }"
     assert_includes response.body, "params.get(\"plugin\") || \"all\""
     assert_includes response.body, "params.get(\"q\") || \"\""
     assert_includes response.body, "syncURL(\"plugins\", \"replace\")"
@@ -288,6 +293,76 @@ class BetterAuthExamplesTest < Minitest::Test
     assert_equal 200, response.status
     assert_equal true, JSON.parse(response.body).fetch("ok")
     assert_equal "admin", user.fetch("role")
+  end
+
+  def test_dashboard_can_reset_and_seed_example_database
+    registry = BetterAuthExamples::AuthRegistry.new(
+      app_name: "Test Example",
+      base_url: "http://localhost:3456",
+      root_path: File.expand_path("tmp", __dir__)
+    )
+    app = BetterAuthExamples::DashboardApp.new(registry, framework_name: "Test")
+    request = Rack::MockRequest.new(app)
+
+    response = request.post("/example/reset-and-seed", "CONTENT_TYPE" => "application/json", :input => "{}")
+    body = JSON.parse(response.body)
+    users = JSON.parse(request.get("/example/users").body).fetch("users")
+
+    assert_equal 200, response.status
+    assert_equal true, body.fetch("ok")
+    assert_operator body.fetch("users").length, :>=, 10
+    assert_operator body.fetch("organizations").length, :>=, 3
+    assert users.any? { |user| user.fetch("role") == "admin" }
+    assert users.any? { |user| user.fetch("organizations").any? { |org| org.fetch("role") == "owner" } }
+    assert users.any? { |user| user.fetch("organizations").empty? }
+
+    tables = registry.explore(BetterAuthExamples::Settings.normalize(database: "memory")).fetch(:tables).to_h { |table| [table.fetch(:name), table.fetch(:count)] }
+    %w[api_keys device_codes jwks oauth_access_tokens oauth_clients oauth_consents oauth_refresh_tokens passkeys scim_providers sso_providers subscriptions two_factors verifications wallet_addresses].each do |table|
+      assert_operator tables.fetch(table), :>=, 1
+    end
+  end
+
+  def test_dashboard_lists_seeded_organizations_with_members
+    registry = BetterAuthExamples::AuthRegistry.new(
+      app_name: "Test Example",
+      base_url: "http://localhost:3456",
+      root_path: File.expand_path("tmp", __dir__)
+    )
+    app = BetterAuthExamples::DashboardApp.new(registry, framework_name: "Test")
+    request = Rack::MockRequest.new(app)
+    request.post("/example/reset-and-seed", "CONTENT_TYPE" => "application/json", :input => "{}")
+
+    response = request.get("/example/organizations")
+    organizations = JSON.parse(response.body).fetch("organizations")
+    acme = organizations.find { |organization| organization.fetch("slug") == "acme-labs" }
+
+    assert_equal 200, response.status
+    assert_operator organizations.length, :>=, 3
+    assert_operator acme.fetch("members").length, :>=, 4
+    assert acme.fetch("members").any? { |member| member.fetch("email") == "billing@example.test" && member.fetch("role") == "admin" }
+  end
+
+  def test_dashboard_can_sign_in_as_seeded_user
+    registry = BetterAuthExamples::AuthRegistry.new(
+      app_name: "Test Example",
+      base_url: "http://localhost:3456",
+      root_path: File.expand_path("tmp", __dir__)
+    )
+    app = BetterAuthExamples::DashboardApp.new(registry, framework_name: "Test")
+    request = Rack::MockRequest.new(app)
+    request.post("/example/reset-and-seed", "CONTENT_TYPE" => "application/json", :input => "{}")
+    user = JSON.parse(request.get("/example/users").body).fetch("users").find { |entry| entry.fetch("email") == "admin@example.test" }
+
+    response = request.post(
+      "/example/users/sign-in",
+      "CONTENT_TYPE" => "application/json",
+      :input => JSON.generate(user_id: user.fetch("id"))
+    )
+    session = registry.auth_for(BetterAuthExamples::Settings.normalize(database: "memory"))
+      .api.get_session(headers: {"cookie" => cookie_header(response["set-cookie"])})
+
+    assert_equal 200, response.status
+    assert_equal "admin@example.test", session.fetch(:user).fetch("email")
   end
 
   def test_api_key_create_works_for_signed_in_dashboard_user
