@@ -79,6 +79,32 @@ RSpec.describe BetterAuth::Rails::Routing do
     expect(response["set-cookie"]).to include("rails_probe=1")
   end
 
+  it "preserves auth cookies across mounted Rails requests" do
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: secret,
+      database: :memory,
+      email_and_password: {enabled: true},
+      session: {store_session_in_database: true}
+    )
+    app = build_route_set do
+      better_auth auth: auth
+    end
+    request = Rack::MockRequest.new(app)
+
+    signup = request.post(
+      "/api/auth/sign-up/email",
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://localhost:3000",
+      :input => JSON.generate(email: "rails-session@example.com", password: "password123", name: "Rails Session")
+    )
+    cookie = signup["set-cookie"].to_s.lines.map { |line| line.split(";").first }.join("; ")
+    session = request.get("/api/auth/get-session?disableCookieCache=true", "HTTP_COOKIE" => cookie)
+
+    expect(signup.status).to eq(200)
+    expect(JSON.parse(session.body).dig("user", "email")).to eq("rails-session@example.com")
+  end
+
   it "keeps server-only plugin endpoints unreachable through the Rails mount" do
     called = false
     plugin = BetterAuth::Plugin.new(
@@ -180,6 +206,23 @@ RSpec.describe BetterAuth::Rails::Routing do
 
     expect(response.status).to eq(500)
     expect(JSON.parse(response.body)).to eq("code" => "INTERNAL_SERVER_ERROR", "message" => "Internal Server Error")
+  end
+
+  it "converts unexpected errors for dynamic mounted auth apps without masking the cause" do
+    dynamic_auth = Class.new do
+      def call(_env)
+        raise "dynamic boom"
+      end
+    end.new
+    app = BetterAuth::Rails::MountedApp.new(dynamic_auth, mount_path: "/api/auth")
+    errors = StringIO.new
+
+    status, _headers, body = app.call(Rack::MockRequest.env_for("/api/auth/boom", "rack.errors" => errors))
+
+    expect(status).to eq(500)
+    expect(JSON.parse(body.join)).to eq("code" => "INTERNAL_SERVER_ERROR", "message" => "Internal Server Error")
+    expect(errors.string).to include("BetterAuth::Rails mounted app error: RuntimeError: dynamic boom")
+    expect(errors.string).to include("routing_spec.rb")
   end
 
   it "honors on_api_error callbacks for unexpected mounted endpoint errors" do

@@ -36,8 +36,9 @@ module BetterAuth
       end
 
       def handle_unexpected_error(error, env)
-        options = @auth.options
-        on_api_error = options.on_api_error || {}
+        log_unexpected_error(error, env)
+        options = @auth.respond_to?(:options) ? @auth.options : nil
+        on_api_error = options&.on_api_error || {}
         raise error if on_api_error[:throw] || on_api_error["throw"]
 
         callback = on_api_error[:on_error] || on_api_error[:onError] || on_api_error["on_error"] || on_api_error["onError"]
@@ -49,6 +50,19 @@ module BetterAuth
           {"content-type" => "application/json"},
           [JSON.generate(api_error.to_h)]
         ]
+      end
+
+      def log_unexpected_error(error, env)
+        message = "BetterAuth::Rails mounted app error: #{error.class}: #{error.message}\n"
+        message << Array(error.backtrace).join("\n")
+
+        if env["rack.errors"]
+          env["rack.errors"].puts(message)
+        elsif defined?(::Rails) && ::Rails.respond_to?(:logger) && ::Rails.logger
+          ::Rails.logger.error(message)
+        end
+      rescue
+        nil
       end
 
       def error_context(env)
