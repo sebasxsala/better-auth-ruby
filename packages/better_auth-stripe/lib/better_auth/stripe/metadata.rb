@@ -59,7 +59,18 @@ module BetterAuth
       def metadata_fetch(metadata, key)
         return nil unless metadata.respond_to?(:[])
 
-        metadata[key] || metadata[key.to_sym] || metadata[BetterAuth::Plugins.normalize_key(key)] || metadata[BetterAuth::Plugins.normalize_key(key).to_s]
+        candidates = [key, key.to_sym, BetterAuth::Plugins.normalize_key(key), BetterAuth::Plugins.normalize_key(key).to_s]
+        if metadata.respond_to?(:key?)
+          candidates.each do |candidate|
+            return metadata[candidate] if metadata.key?(candidate)
+          end
+        end
+
+        candidates.each do |candidate|
+          value = metadata[candidate]
+          return value unless value.nil?
+        end
+        nil
       end
 
       def deep_merge(base, override)

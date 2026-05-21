@@ -21,6 +21,25 @@ class BetterAuthStripeUtilsTest < Minitest::Test
     refute BetterAuth::Stripe::Utils.pending_cancel?({})
   end
 
+  def test_fetch_preserves_explicit_false_values_from_string_keyed_stripe_objects
+    subscription = {
+      "status" => "active",
+      "cancel_at_period_end" => false,
+      "items" => {
+        "data" => [
+          {
+            "current_period_start" => 1_700_000_000,
+            "current_period_end" => 1_700_086_400,
+            "price" => {"recurring" => {"interval" => "month"}}
+          }
+        ]
+      }
+    }
+
+    assert_equal false, BetterAuth::Stripe::Utils.fetch(subscription, "cancel_at_period_end")
+    assert_equal false, BetterAuth::Stripe::Utils.subscription_state(subscription, compact: false).fetch(:cancelAtPeriodEnd)
+  end
+
   def test_resolve_plan_item_matches_single_item_by_price_id
     result = BetterAuth::Stripe::Utils.resolve_plan_item(config_with_price_ids, subscription_items([{price: {id: "price_starter", lookup_key: nil}}]))
 

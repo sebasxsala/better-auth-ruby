@@ -16,7 +16,12 @@ module BetterAuth
       def fetch(object, key)
         return nil unless object.respond_to?(:[])
 
-        object[key] || object[key.to_sym]
+        return object[key] if object.respond_to?(:key?) && object.key?(key)
+
+        symbol_key = key.to_sym
+        return object[symbol_key] if object.respond_to?(:key?) && object.key?(symbol_key)
+
+        object[key] || object[symbol_key]
       end
 
       def time(value)
