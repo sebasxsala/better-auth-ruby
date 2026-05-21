@@ -2,8 +2,11 @@
 
 require "json"
 require_relative "../../test_helper"
+require_relative "adapter_contract"
 
 class BetterAuthPostgresAdapterTest < Minitest::Test
+  include BetterAuthAdapterContract
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_postgres_adapter_can_be_instantiated_without_rails
@@ -81,8 +84,24 @@ class BetterAuthPostgresAdapterTest < Minitest::Test
 
   private
 
+  def with_contract_adapter(config)
+    require "pg"
+
+    connection = PG.connect(ENV.fetch("BETTER_AUTH_POSTGRES_URL", "postgres://user:password@localhost:5432/better_auth"))
+    reset_schema(connection)
+    create_schema(connection, config)
+    yield BetterAuth::Adapters::Postgres.new(config, connection: connection)
+  rescue LoadError
+    skip "pg gem is not installed"
+  rescue PG::ConnectionBad
+    skip "PostgreSQL test service is not available"
+  ensure
+    connection&.close
+  end
+
   def reset_schema(connection)
-    %w[rate_limits verifications accounts sessions users].each do |table|
+    tables = connection.exec("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").map { |row| row.fetch("tablename") }
+    tables.each do |table|
       connection.exec(%(DROP TABLE IF EXISTS "#{table}" CASCADE))
     end
   end

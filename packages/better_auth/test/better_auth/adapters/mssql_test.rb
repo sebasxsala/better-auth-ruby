@@ -2,8 +2,11 @@
 
 require "json"
 require_relative "../../test_helper"
+require_relative "adapter_contract"
 
 class BetterAuthMSSQLAdapterTest < Minitest::Test
+  include BetterAuthAdapterContract
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_mssql_adapter_can_be_instantiated_with_injected_connection
@@ -88,6 +91,23 @@ class BetterAuthMSSQLAdapterTest < Minitest::Test
   end
 
   private
+
+  def with_contract_adapter(config)
+    require "sequel"
+    require "tiny_tds"
+
+    ensure_database
+    connection = Sequel.connect(ENV.fetch("BETTER_AUTH_MSSQL_URL", "tinytds://sa:Password123!@127.0.0.1:1433/better_auth?timeout=30"))
+    reset_schema(connection)
+    create_schema(connection, config)
+    yield BetterAuth::Adapters::MSSQL.new(config, connection: connection)
+  rescue LoadError
+    skip "sequel or tiny_tds gem is not installed"
+  rescue Sequel::DatabaseConnectionError
+    skip "MSSQL test service is not available"
+  ensure
+    connection&.disconnect
+  end
 
   def ensure_database
     master = Sequel.connect(ENV.fetch("BETTER_AUTH_MSSQL_MASTER_URL", "tinytds://sa:Password123!@127.0.0.1:1433/master?timeout=30"))

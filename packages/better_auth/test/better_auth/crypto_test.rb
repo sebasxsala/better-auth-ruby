@@ -17,6 +17,10 @@ class BetterAuthCryptoTest < Minitest::Test
     refute BetterAuth::Crypto.verify_hmac_signature("tampered", signature, "secret")
   end
 
+  def test_constant_time_compare_rejects_length_mismatch
+    refute BetterAuth::Crypto.constant_time_compare("abc", "abcd")
+  end
+
   def test_symmetric_encryption_round_trips_authenticated_payloads
     encrypted = BetterAuth::Crypto.symmetric_encrypt(key: "secret", data: "payload")
 
@@ -28,6 +32,8 @@ class BetterAuthCryptoTest < Minitest::Test
   def test_secret_rotation_envelope_parser_matches_upstream_shape
     assert_nil BetterAuth::Crypto.parse_envelope("abcdef1234567890")
     assert_nil BetterAuth::Crypto.parse_envelope("$ba$abc$abcdef")
+    assert_nil BetterAuth::Crypto.parse_envelope("$ba$2$")
+    assert_nil BetterAuth::Crypto.parse_envelope("$ba$$abcdef")
     assert_equal({version: 2, ciphertext: "abcdef1234567890"}, BetterAuth::Crypto.parse_envelope("$ba$2$abcdef1234567890"))
   end
 
@@ -115,6 +121,41 @@ class BetterAuthCryptoTest < Minitest::Test
     assert_nil BetterAuth::Crypto.symmetric_decode_jwt("#{token}x", "secret-with-enough-entropy-for-jwe", "better-auth-session")
   end
 
+  def test_symmetric_jwe_rejects_invalid_header_alg_and_enc
+    token = BetterAuth::Crypto.symmetric_encode_jwt(
+      {"sub" => "user-1"},
+      "secret-with-enough-entropy-for-jwe",
+      "better-auth-session",
+      expires_in: 60
+    )
+    parts = token.split(".")
+
+    invalid_alg = parts.dup
+    invalid_alg[0] = BetterAuth::Crypto.base64url_encode(JSON.generate({"alg" => "none", "enc" => "A256CBC-HS512"}))
+    invalid_enc = parts.dup
+    invalid_enc[0] = BetterAuth::Crypto.base64url_encode(JSON.generate({"alg" => "dir", "enc" => "A128GCM"}))
+
+    assert_nil BetterAuth::Crypto.symmetric_decode_jwt(invalid_alg.join("."), "secret-with-enough-entropy-for-jwe", "better-auth-session")
+    assert_nil BetterAuth::Crypto.symmetric_decode_jwt(invalid_enc.join("."), "secret-with-enough-entropy-for-jwe", "better-auth-session")
+  end
+
+  def test_symmetric_jwe_rejects_expired_tokens_after_clock_tolerance
+    issued_at = Time.at(1_700_000_000)
+    token = nil
+    Time.stub(:now, issued_at) do
+      token = BetterAuth::Crypto.symmetric_encode_jwt(
+        {"sub" => "expired-user"},
+        "secret-with-enough-entropy-for-jwe",
+        "better-auth-session",
+        expires_in: 1
+      )
+    end
+
+    Time.stub(:now, issued_at + BetterAuth::Crypto::JWE::CLOCK_TOLERANCE + 2) do
+      assert_nil BetterAuth::Crypto.symmetric_decode_jwt(token, "secret-with-enough-entropy-for-jwe", "better-auth-session")
+    end
+  end
+
   def test_symmetric_jwe_decodes_rotated_and_legacy_tokens
     old_config = BetterAuth::SecretConfig.new(
       keys: {1 => "old-secret-that-is-long-enough-for-jwe"},
@@ -146,5 +187,11 @@ class BetterAuthCryptoTest < Minitest::Test
 
     assert_equal "legacy-user", BetterAuth::Crypto.symmetric_decode_jwt(legacy_token, legacy_config, "better-auth-session").fetch("sub")
     assert_nil BetterAuth::Crypto.symmetric_decode_jwt(token, legacy_config, "better-auth-session")
+  end
+
+  def test_keccak256_and_checksum_address_match_known_vectors
+    assert_equal "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470", BetterAuth::Crypto.keccak256("")
+    assert_equal "0x52908400098527886E0F7030069857D2E4169EE7", BetterAuth::Crypto.to_checksum_address("52908400098527886e0f7030069857d2e4169ee7")
+    assert_equal "0x8617E340B3D01FA5F11F306F4090FD50E238070D", BetterAuth::Crypto.to_checksum_address("0x8617e340b3d01fa5f11f306f4090fd50e238070d")
   end
 end

@@ -602,6 +602,58 @@ class BetterAuthRouterTest < Minitest::Test
     assert_equal 429, auth.call(rack_env("POST", "/api/auth/sign-in/email", body: {"email" => "a@example.com"})).first
   end
 
+  def test_rate_limit_applies_upstream_password_and_verification_special_rules
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      email_and_password: {
+        enabled: true,
+        send_reset_password: ->(_data, _request) {}
+      },
+      email_verification: {
+        send_verification_email: ->(_data, _request) {}
+      },
+      rate_limit: {enabled: true, window: 60, max: 100}
+    )
+
+    3.times do
+      assert_equal 200, auth.call(rack_env("POST", "/api/auth/request-password-reset", body: {"email" => "missing@example.com"})).first
+      assert_equal 200, auth.call(rack_env("POST", "/api/auth/send-verification-email", body: {"email" => "missing@example.com"})).first
+    end
+
+    assert_equal 429, auth.call(rack_env("POST", "/api/auth/request-password-reset?nonce=1", body: {"email" => "missing@example.com"})).first
+    assert_equal 429, auth.call(rack_env("POST", "/api/auth/send-verification-email?nonce=1", body: {"email" => "missing@example.com"})).first
+  end
+
+  def test_rate_limit_applies_upstream_forget_password_and_email_otp_special_rules
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      rate_limit: {enabled: true, window: 60, max: 100},
+      plugins: [
+        {
+          id: "special-rule-paths",
+          endpoints: {
+            forget_password: BetterAuth::Endpoint.new(path: "/forget-password/callback", method: "POST") { {ok: true} },
+            email_otp_verification: BetterAuth::Endpoint.new(path: "/email-otp/send-verification-otp", method: "POST") { {ok: true} },
+            email_otp_reset: BetterAuth::Endpoint.new(path: "/email-otp/request-password-reset", method: "POST") { {ok: true} }
+          }
+        }
+      ]
+    )
+
+    [
+      "/forget-password/callback",
+      "/email-otp/send-verification-otp",
+      "/email-otp/request-password-reset"
+    ].each do |path|
+      3.times do
+        assert_equal 200, auth.call(rack_env("POST", "/api/auth#{path}", body: {"email" => "missing@example.com"})).first
+      end
+      assert_equal 429, auth.call(rack_env("POST", "/api/auth#{path}?nonce=1", body: {"email" => "missing@example.com"})).first
+    end
+  end
+
   def test_rate_limit_honors_custom_rules_and_false_disables
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",

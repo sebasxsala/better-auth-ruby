@@ -2,9 +2,11 @@
 
 require "json"
 require_relative "../../test_helper"
+require_relative "adapter_contract"
 
 class BetterAuthMySQLAdapterTest < Minitest::Test
   include BetterAuthMySQLTestHelpers
+  include BetterAuthAdapterContract
 
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
@@ -151,6 +153,21 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
   end
 
   private
+
+  def with_contract_adapter(config)
+    require "mysql2"
+
+    connection = mysql_connection
+    reset_mysql_schema(connection)
+    create_schema(connection, config)
+    yield BetterAuth::Adapters::MySQL.new(config, connection: connection)
+  rescue LoadError
+    skip "mysql2 gem is not installed"
+  rescue Mysql2::Error::ConnectionError
+    skip "MySQL test service is not available"
+  ensure
+    connection&.close
+  end
 
   def create_schema(connection, config)
     BetterAuth::Schema::SQL.create_statements(config, dialect: :mysql).each { |statement| connection.query(statement) }

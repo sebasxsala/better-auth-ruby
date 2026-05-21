@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "../../test_helper"
+require_relative "adapter_contract"
 
 class BetterAuthMemoryAdapterTest < Minitest::Test
+  include BetterAuthAdapterContract
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def setup
@@ -221,5 +224,11 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
     )
 
     assert_equal profile, found["profile"]
+  end
+
+  private
+
+  def with_contract_adapter(config)
+    yield BetterAuth::Adapters::Memory.new(config)
   end
 end

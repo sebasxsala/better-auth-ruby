@@ -3,8 +3,11 @@
 require "json"
 require "tempfile"
 require_relative "../../test_helper"
+require_relative "adapter_contract"
 
 class BetterAuthSQLiteAdapterTest < Minitest::Test
+  include BetterAuthAdapterContract
+
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_sqlite_adapter_can_be_instantiated_with_injected_connection
@@ -286,6 +289,22 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
   end
 
   private
+
+  def with_contract_adapter(config)
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-contract", ".sqlite3"]) do |file|
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      connection.execute("PRAGMA foreign_keys = ON")
+      create_schema(connection, config)
+      yield BetterAuth::Adapters::SQLite.new(config, connection: connection)
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
 
   def create_schema(connection, config)
     BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).each { |statement| connection.execute(statement) }

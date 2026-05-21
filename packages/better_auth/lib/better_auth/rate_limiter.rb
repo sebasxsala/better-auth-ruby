@@ -121,9 +121,14 @@ module BetterAuth
     end
 
     def default_special_rule(path)
-      return unless path.start_with?("/sign-in", "/sign-up", "/change-password", "/change-email")
+      return {window: 10, max: 3} if path.start_with?("/sign-in", "/sign-up", "/change-password", "/change-email")
+      return {window: 60, max: 3} if path == "/request-password-reset" ||
+        path == "/send-verification-email" ||
+        path.start_with?("/forget-password") ||
+        path == "/email-otp/send-verification-otp" ||
+        path == "/email-otp/request-password-reset"
 
-      {window: 10, max: 3}
+      nil
     end
 
     def matching_custom_rule(config, path)
