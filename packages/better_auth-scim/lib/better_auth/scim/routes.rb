@@ -214,7 +214,14 @@ module BetterAuth
             end
 
             total_results = ctx.context.internal_adapter.count_total_users(where: where)
-            users = ctx.context.internal_adapter.list_users(where: where, sort_by: {field: "email", direction: "asc"}, limit: count, offset: start_index - 1)
+            offset = start_index - 1
+            limit = count || ((offset > 0) ? [total_results - offset, 0].max : nil)
+            users = ctx.context.internal_adapter.list_users(
+              where: where,
+              sort_by: {field: "email", direction: "asc"},
+              limit: limit,
+              offset: offset.positive? ? offset : nil
+            )
             accounts_by_user = accounts.each_with_object({}) { |account, result| result[account.fetch("userId")] ||= account }
             resources = users.map { |user| scim_user_resource(user, accounts_by_user[user.fetch("id")], ctx.context.base_url) }
             ctx.json({schemas: [SCIM_LIST_RESPONSE_SCHEMA], totalResults: total_results, itemsPerPage: resources.length, startIndex: start_index, Resources: resources})

@@ -32,5 +32,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "bundler", "~> 2.5"
   spec.add_development_dependency "minitest", "~> 5.25"
   spec.add_development_dependency "rake", "~> 13.2"
+  spec.add_development_dependency "sqlite3", "~> 2.0"
   spec.add_development_dependency "standardrb", "~> 1.0"
 end

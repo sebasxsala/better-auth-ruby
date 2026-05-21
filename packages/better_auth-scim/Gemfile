@@ -11,5 +11,6 @@ gemspec name: "better_auth-scim"
 group :development, :test do
   gem "minitest", "~> 5.25"
   gem "rake", "~> 13.2"
+  gem "sqlite3", "~> 2.0"
   gem "standardrb", "~> 1.0"
 end

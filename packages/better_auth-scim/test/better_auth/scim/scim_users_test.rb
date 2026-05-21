@@ -88,6 +88,12 @@ class BetterAuthPluginsScimUsersTest < Minitest::Test
     assert_equal 1, page.fetch(:itemsPerPage)
     assert_equal ["bravo@example.com"], page.fetch(:Resources).map { |user| user.fetch(:userName) }
 
+    open_ended = auth.api.list_scim_users(headers: headers, query: {startIndex: "2"})
+    assert_equal 3, open_ended.fetch(:totalResults)
+    assert_equal 2, open_ended.fetch(:startIndex)
+    assert_equal 2, open_ended.fetch(:itemsPerPage)
+    assert_equal %w[bravo@example.com charlie@example.com], open_ended.fetch(:Resources).map { |user| user.fetch(:userName) }
+
     beyond = auth.api.list_scim_users(headers: headers, query: {startIndex: "10", count: "2"})
     assert_equal 3, beyond.fetch(:totalResults)
     assert_equal 10, beyond.fetch(:startIndex)

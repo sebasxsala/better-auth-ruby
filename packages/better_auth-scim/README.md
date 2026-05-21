@@ -61,3 +61,23 @@ The plugin exposes upstream-style surface metadata:
 ## Production recommendations
 
 - In the accounts table (`accounts` or the configured table name), use a unique composite index on `(providerId, accountId)` to prevent duplicate SCIM accounts under concurrent provisioning. The gem does not create this constraint automatically because index syntax and migrations depend on your database adapter and application.
+
+## Testing
+
+Run the default SCIM package suite from this package directory:
+
+```sh
+rbenv exec bundle exec rake test
+```
+
+The suite includes SCIM route coverage for memory, custom, secondary-storage,
+and database-backed rate limiting. It also runs a live SQLite adapter smoke test
+against a temporary database.
+
+External adapter smoke tests are skip-gated. They run only when the relevant gem
+and service are available:
+
+- PostgreSQL: `BETTER_AUTH_POSTGRES_URL`
+- MySQL: `BETTER_AUTH_MYSQL_HOST`, `BETTER_AUTH_MYSQL_PORT`, `BETTER_AUTH_MYSQL_USER`, `BETTER_AUTH_MYSQL_PASSWORD`, `BETTER_AUTH_MYSQL_DATABASE`
+- MSSQL: `BETTER_AUTH_MSSQL_URL`, `BETTER_AUTH_MSSQL_MASTER_URL`
+- MongoDB: `BETTER_AUTH_MONGODB_URL`
