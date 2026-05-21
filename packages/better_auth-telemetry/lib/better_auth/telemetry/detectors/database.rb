@@ -21,8 +21,9 @@ module BetterAuth
       #
       # 1. **Context override** — when the caller supplied a non-empty
       #    `context.database` string, return it verbatim with
-      #    `version: nil`. This is the upstream `context.database`
-      #    seam.
+      #    `version: nil`. The generic `"adapter"` marker is refined
+      #    from `context.adapter` when it names a known
+      #    `BetterAuth::Adapters::*` class.
       # 2. **Configuration adapter** — when `options` is a
       #    {BetterAuth::Configuration} (or a hash with a `:database`
       #    key) and the value is a known adapter symbol
@@ -62,7 +63,8 @@ module BetterAuth
           "BetterAuth::Adapters::MySQL" => "mysql",
           "BetterAuth::Adapters::SQLite" => "sqlite",
           "BetterAuth::Adapters::MSSQL" => "mssql",
-          "BetterAuth::Adapters::Memory" => "memory"
+          "BetterAuth::Adapters::Memory" => "memory",
+          "BetterAuth::Adapters::MongoDB" => "mongodb"
         }.freeze
 
         # Map from a known {BetterAuth::Configuration#database} symbol
@@ -108,8 +110,10 @@ module BetterAuth
 
         # Read `database` from a {NormalizedContext}-like or hash-like
         # context. Returns the raw string when present and non-empty,
-        # otherwise `nil`. Non-string values (e.g. a symbol set
-        # accidentally) are ignored to keep the wire shape stable.
+        # otherwise `nil`. The generic `"adapter"` marker is refined
+        # from a known `context.adapter` class name when possible.
+        # Non-string values (e.g. a symbol set accidentally) are
+        # ignored to keep the wire shape stable.
         #
         # @param context [#database, Hash, nil]
         # @return [String, nil]
@@ -126,7 +130,31 @@ module BetterAuth
           return nil unless value.is_a?(String)
           return nil if value.empty?
 
+          return context_adapter_identifier(context) || value if value == "adapter"
+
           value
+        end
+
+        # Read `adapter` from a {NormalizedContext}-like or hash-like
+        # context and map known `BetterAuth::Adapters::*` class names to
+        # their database identifiers. Unknown names stay generic by
+        # returning `nil` so the caller can preserve `"adapter"`.
+        #
+        # @param context [#adapter, Hash, nil]
+        # @return [String, nil]
+        def context_adapter_identifier(context)
+          return nil if context.nil?
+
+          value =
+            if context.respond_to?(:adapter)
+              context.adapter
+            elsif context.respond_to?(:[])
+              context[:adapter] || context["adapter"]
+            end
+
+          return nil unless value.is_a?(String)
+
+          ADAPTER_CLASS_MAP[value]
         end
 
         # Translate the configuration's `database` value into a short
@@ -170,7 +198,19 @@ module BetterAuth
             return ADAPTER_SYMBOLS[value]
           end
 
-          ADAPTER_CLASS_MAP[value.class.name]
+          ADAPTER_CLASS_MAP[adapter_class_name(value)]
+        end
+
+        # Resolve an object's class name without requiring the class
+        # constant to exist. Some tests and external adapters expose a
+        # class-like singleton object whose `#name` carries the adapter
+        # identifier.
+        #
+        # @param value [Object]
+        # @return [String, nil]
+        def adapter_class_name(value)
+          klass = value.class
+          klass.name if klass.respond_to?(:name)
         end
 
         # Walk {GEM_FALLBACKS} in order and return the first

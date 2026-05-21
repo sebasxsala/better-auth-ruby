@@ -30,9 +30,10 @@ class DatabaseDetectorTest < Minitest::Test
     end
   end
 
-  # Minimal stand-in for {NormalizedContext}. The detector only needs
-  # something that responds to `#database`.
-  StubContext = Struct.new(:database)
+  # Minimal stand-in for {NormalizedContext}. The detector reads
+  # `#database` first and, when it is the generic "adapter" marker,
+  # may refine the signal from `#adapter`.
+  StubContext = Struct.new(:database, :adapter, keyword_init: true)
 
   # Build a {BetterAuth::Configuration} with a specific `database`
   # value and the minimum other keys needed to instantiate it without
@@ -49,7 +50,7 @@ class DatabaseDetectorTest < Minitest::Test
   # ---------------------------------------------------------------------
 
   def test_context_database_override_short_circuits_with_nil_version
-    context = StubContext.new("postgresql")
+    context = StubContext.new(database: "postgresql")
 
     result = Database.call(nil, context)
 
@@ -57,7 +58,7 @@ class DatabaseDetectorTest < Minitest::Test
   end
 
   def test_context_override_wins_over_configuration_database
-    context = StubContext.new("custom-db")
+    context = StubContext.new(database: "custom-db")
     config = configuration_with_database(:postgres)
 
     result = Database.call(config, context)
@@ -66,7 +67,7 @@ class DatabaseDetectorTest < Minitest::Test
   end
 
   def test_context_override_wins_over_gem_fallback
-    context = StubContext.new("custom-db")
+    context = StubContext.new(database: "custom-db")
 
     with_loaded_specs("pg" => FakeSpec.with_version("1.5.6")) do
       assert_equal({name: "custom-db", version: nil}, Database.call(nil, context))
@@ -74,7 +75,7 @@ class DatabaseDetectorTest < Minitest::Test
   end
 
   def test_empty_context_database_is_ignored
-    context = StubContext.new("")
+    context = StubContext.new(database: "")
 
     with_loaded_specs({}) do
       assert_nil Database.call(nil, context)
@@ -82,7 +83,7 @@ class DatabaseDetectorTest < Minitest::Test
   end
 
   def test_non_string_context_database_is_ignored
-    context = StubContext.new(:postgres)
+    context = StubContext.new(database: :postgres)
 
     with_loaded_specs({}) do
       assert_nil Database.call(nil, context)
@@ -104,6 +105,67 @@ class DatabaseDetectorTest < Minitest::Test
   def test_hash_context_with_string_key_is_honored
     with_loaded_specs({}) do
       assert_equal({name: "mongo", version: nil}, Database.call(nil, {"database" => "mongo"}))
+    end
+  end
+
+  def test_context_generic_adapter_marker_uses_known_adapter_class
+    expected = {
+      "BetterAuth::Adapters::Memory" => "memory",
+      "BetterAuth::Adapters::Postgres" => "postgres",
+      "BetterAuth::Adapters::MySQL" => "mysql",
+      "BetterAuth::Adapters::SQLite" => "sqlite",
+      "BetterAuth::Adapters::MSSQL" => "mssql",
+      "BetterAuth::Adapters::MongoDB" => "mongodb"
+    }
+
+    expected.each do |adapter_class_name, database_name|
+      context = StubContext.new(database: "adapter", adapter: adapter_class_name)
+
+      with_loaded_specs({}) do
+        assert_equal(
+          {name: database_name, version: nil},
+          Database.call(nil, context),
+          "expected context adapter #{adapter_class_name.inspect} to resolve"
+        )
+      end
+    end
+  end
+
+  def test_hash_context_generic_adapter_marker_uses_known_adapter_class
+    context = {
+      database: "adapter",
+      adapter: "BetterAuth::Adapters::MongoDB"
+    }
+
+    with_loaded_specs({}) do
+      assert_equal({name: "mongodb", version: nil}, Database.call(nil, context))
+    end
+  end
+
+  def test_hash_context_string_keys_generic_adapter_marker_uses_known_adapter_class
+    context = {
+      "database" => "adapter",
+      "adapter" => "BetterAuth::Adapters::MongoDB"
+    }
+
+    with_loaded_specs({}) do
+      assert_equal({name: "mongodb", version: nil}, Database.call(nil, context))
+    end
+  end
+
+  def test_custom_context_database_wins_over_known_adapter_class
+    context = StubContext.new(database: "custom-db", adapter: "BetterAuth::Adapters::MongoDB")
+
+    with_loaded_specs({}) do
+      assert_equal({name: "custom-db", version: nil}, Database.call(nil, context))
+    end
+  end
+
+  def test_unknown_context_adapter_class_remains_generic_adapter
+    context = StubContext.new(database: "adapter", adapter: "Acme::Internal::ShardAdapter")
+
+    with_loaded_specs({}) do
+      assert_equal({name: "adapter", version: nil}, Database.call(nil, context))
     end
   end
 
@@ -139,6 +201,25 @@ class DatabaseDetectorTest < Minitest::Test
 
     with_loaded_specs({}) do
       assert_equal({name: "memory", version: nil}, Database.call(config, nil))
+    end
+  end
+
+  def test_identify_adapter_resolves_every_known_adapter_class_name
+    expected = {
+      "BetterAuth::Adapters::Memory" => "memory",
+      "BetterAuth::Adapters::Postgres" => "postgres",
+      "BetterAuth::Adapters::MySQL" => "mysql",
+      "BetterAuth::Adapters::SQLite" => "sqlite",
+      "BetterAuth::Adapters::MSSQL" => "mssql",
+      "BetterAuth::Adapters::MongoDB" => "mongodb"
+    }
+
+    expected.each do |class_name, database_name|
+      adapter_class = Class.new
+      adapter_class.define_singleton_method(:name) { class_name }
+      adapter = adapter_class.new
+
+      assert_equal database_name, Database.identify_adapter(adapter)
     end
   end
 

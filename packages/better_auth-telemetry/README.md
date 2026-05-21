@@ -177,6 +177,17 @@ The intentional Ruby-specific deviations are:
   to `Gem.loaded_specs` for `sequel`, `pg`, `mysql2`, `sqlite3`,
   `activerecord`, `mongoid`, `mongo`, `rom-sql` (in that order) when no
   context override or `BetterAuth::Adapters::*` adapter class match is found.
+  Known Better Auth adapter classes are reported as `memory`, `postgres`,
+  `mysql`, `sqlite`, `mssql`, or `mongodb`. When core passes the generic
+  `"adapter"` database marker for an external adapter, telemetry refines it
+  from `context.adapter` only when the adapter class is known; unknown
+  namespaced adapters remain the generic `"adapter"` marker.
+- **Telemetry tests validate metadata only.** This package does not boot real
+  Rails, Sinatra, Hanami, or database-backed applications, and it does not run
+  rate-limit behavior against every storage backend. Those behaviors belong to
+  the framework, adapter, and core packages. Telemetry coverage is intentionally
+  limited to detector precedence, redaction shape, opt-in decisions, and
+  delivery behavior.
 - **Standard library only HTTP.** HTTP delivery uses `Net::HTTP` with 5-second
   open, read, and write timeouts behind a bounded single-worker dispatcher. No
   external HTTP-client gem is required at runtime, and HTTP delivery does not
