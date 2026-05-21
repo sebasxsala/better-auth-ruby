@@ -48,4 +48,11 @@ class BetterAuthStripeMetadataTest < Minitest::Test
     assert_equal "user", metadata.fetch("customerType")
     assert_equal "value", metadata.fetch("customField")
   end
+
+  def test_metadata_fetch_preserves_explicit_false_values
+    metadata = {"customerType" => false, "referenceId" => false}
+
+    assert_equal false, BetterAuth::Stripe::Metadata.metadata_fetch(metadata, "customerType")
+    assert_equal false, BetterAuth::Stripe::Metadata.subscription_get(metadata).fetch(:referenceId)
+  end
 end
