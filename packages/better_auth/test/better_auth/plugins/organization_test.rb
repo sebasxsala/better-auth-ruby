@@ -203,6 +203,30 @@ class BetterAuthPluginsOrganizationTest < Minitest::Test
     assert_equal 400, expired.status_code
   end
 
+  def test_invitation_reinvite_cancel_and_user_lists_only_pending_states
+    auth = build_auth(plugins: [BetterAuth::Plugins.organization(cancel_pending_invitations_on_re_invite: true)])
+    owner_cookie = sign_up_cookie(auth, email: "reinvite-owner@example.com")
+    invitee_cookie = sign_up_cookie(auth, email: "reinvitee@example.com")
+    organization = auth.api.create_organization(headers: {"cookie" => owner_cookie}, body: {name: "Reinvite", slug: "reinvite"})
+
+    first = auth.api.create_invitation(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), email: "reinvitee@example.com", role: "member"})
+    second = auth.api.create_invitation(headers: {"cookie" => owner_cookie}, body: {organizationId: organization.fetch("id"), email: "REINVITEE@example.com", role: "admin"})
+
+    assert_equal "canceled", auth.api.get_invitation(query: {invitationId: first.fetch("id")}).fetch("status")
+    assert_equal "pending", second.fetch("status")
+    assert_equal "admin", second.fetch("role")
+
+    all_statuses = auth.api.list_invitations(headers: {"cookie" => owner_cookie}, query: {organizationId: organization.fetch("id")}).map { |entry| entry.fetch("status") }
+    assert_equal ["canceled", "pending"], all_statuses.sort
+
+    user_invitations = auth.api.list_user_invitations(headers: {"cookie" => invitee_cookie})
+    assert_equal [second.fetch("id")], user_invitations.map { |entry| entry.fetch("id") }
+
+    canceled = auth.api.cancel_invitation(headers: {"cookie" => owner_cookie}, body: {invitationId: second.fetch("id")})
+    assert_equal "canceled", canceled.fetch("status")
+    assert_empty auth.api.list_user_invitations(headers: {"cookie" => invitee_cookie})
+  end
+
   def test_invitation_hooks_can_override_data_and_use_active_organization
     calls = []
     auth = build_auth(

@@ -286,6 +286,30 @@ class BetterAuthPluginsDeviceAuthorizationTest < Minitest::Test
     assert_equal "pending", verified[:status]
   end
 
+  def test_custom_expiration_and_interval_are_stored_as_seconds_and_milliseconds
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        BetterAuth::Plugins.device_authorization(
+          expires_in: "2m",
+          interval: "7s",
+          generate_device_code: -> { "device-code-timing" },
+          generate_user_code: -> { "TIMING1" }
+        )
+      ]
+    )
+
+    issued = auth.api.device_code(body: {client_id: "cli"})
+    record = auth.context.adapter.find_one(model: "deviceCode", where: [{field: "deviceCode", value: issued.fetch(:device_code)}])
+
+    assert_equal 120, issued.fetch(:expires_in)
+    assert_equal 7, issued.fetch(:interval)
+    assert_equal 7_000, record.fetch("pollingInterval")
+    assert_in_delta Time.now + 120, record.fetch("expiresAt"), 5
+  end
+
   def test_device_auth_request_hook_runs_before_persistence
     auth = BetterAuth.auth(
       base_url: "http://localhost:3000",

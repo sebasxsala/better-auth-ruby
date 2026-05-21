@@ -55,7 +55,7 @@ module BetterAuth
         rate_limit: [
           {
             path_matcher: ->(path) { path.start_with?("/phone-number") },
-            window: 60_000,
+            window: 60,
             max: 10
           }
         ],

@@ -104,6 +104,14 @@ class BetterAuthPluginsOAuthProxyTest < Minitest::Test
     status, headers, _body = auth.api.o_auth_proxy(query: {callbackURL: "/dashboard", cookies: "bad"}, as_response: true)
     assert_equal 302, status
     assert_includes URI.decode_www_form_component(headers.fetch("location")), "Invalid cookies or secret"
+
+    missing_cookies = BetterAuth::Crypto.symmetric_encrypt(
+      key: auth.context.secret,
+      data: JSON.generate({timestamp: (Time.now.to_f * 1000).to_i})
+    )
+    status, headers, _body = auth.api.o_auth_proxy(query: {callbackURL: "/dashboard", cookies: missing_cookies}, as_response: true)
+    assert_equal 302, status
+    assert_includes URI.decode_www_form_component(headers.fetch("location")), "Invalid payload structure"
   end
 
   def test_oauth_proxy_callback_rejects_untrusted_callback_url

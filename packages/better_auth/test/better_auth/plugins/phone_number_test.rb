@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "rack/mock"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsPhoneNumberTest < Minitest::Test
@@ -81,6 +82,26 @@ class BetterAuthPluginsPhoneNumberTest < Minitest::Test
     end
     assert_equal 400, error.status_code
     assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["PHONE_NUMBER_CANNOT_BE_UPDATED"], error.message
+  end
+
+  def test_update_user_rejects_phone_number_through_rack_request
+    auth = build_auth(plugins: [BetterAuth::Plugins.phone_number(send_otp: ->(_data, _ctx = nil) {})])
+    _status, headers, _body = auth.api.sign_up_email(
+      body: {email: "phone-rack-update@example.com", password: "password123", name: "Rack Update"},
+      as_response: true
+    )
+
+    response = Rack::MockRequest.new(auth).post(
+      "/api/auth/update-user",
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_COOKIE" => cookie_header(headers.fetch("set-cookie")),
+      "HTTP_ORIGIN" => "http://localhost:3000",
+      :input => JSON.generate(phoneNumber: "+19998887777")
+    )
+    body = JSON.parse(response.body)
+
+    assert_equal 400, response.status
+    assert_equal BetterAuth::Plugins::PHONE_NUMBER_ERROR_CODES["PHONE_NUMBER_CANNOT_BE_UPDATED"], body.fetch("message")
   end
 
   def test_sign_in_with_phone_number_and_password
