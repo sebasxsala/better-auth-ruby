@@ -85,6 +85,125 @@ class OAuthProviderAuthorizationRegistrationTest < Minitest::Test
     assert_equal "http://localhost:3000", params.fetch("iss")
   end
 
+  def test_max_age_zero_forces_reauthentication_for_existing_session
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    status, headers, = authorize_response(
+      auth,
+      cookie,
+      client,
+      scope: "openid",
+      state: "max-age-zero",
+      extra: {max_age: "0"}
+    )
+
+    assert_equal 302, status
+    uri = URI.parse(headers.fetch("location"))
+    assert_equal "/login", uri.path
+    params = Rack::Utils.parse_query(uri.query)
+    assert_equal client[:client_id], params.fetch("client_id")
+    assert_equal "max-age-zero", params.fetch("state")
+    assert_equal "0", params.fetch("max_age")
+  end
+
+  def test_max_age_within_session_age_does_not_force_reauthentication
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    status, headers, = authorize_response(
+      auth,
+      cookie,
+      client,
+      scope: "openid",
+      state: "max-age-valid",
+      extra: {max_age: "3600"}
+    )
+
+    assert_equal 302, status
+    params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+    assert params["code"], "expected authorization code redirect, got #{params.inspect}"
+    assert_equal "max-age-valid", params.fetch("state")
+    refute_equal "/login", URI.parse(headers.fetch("location")).path
+  end
+
+  def test_invalid_and_negative_max_age_are_ignored
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth)
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    ["not-a-number", "-1"].each do |max_age|
+      status, headers, = authorize_response(
+        auth,
+        cookie,
+        client,
+        scope: "openid",
+        state: "max-age-#{max_age}",
+        extra: {max_age: max_age}
+      )
+
+      assert_equal 302, status
+      params = Rack::Utils.parse_query(URI.parse(headers.fetch("location")).query)
+      assert params["code"], "expected authorization code redirect for max_age=#{max_age}, got #{params.inspect}"
+      refute_equal "/login", URI.parse(headers.fetch("location")).path
+    end
+  end
+
+  def test_signed_oauth_query_resumes_authorization_after_email_sign_in
+    auth = build_auth(scopes: ["openid"])
+    cookie = sign_up_cookie(auth, email: "resume@example.com")
+    client = create_client(auth, cookie, scope: "openid", skip_consent: true)
+
+    status, headers, = authorize_response(
+      auth,
+      nil,
+      client,
+      scope: "openid",
+      state: "resume-state"
+    )
+    assert_equal 302, status
+    oauth_query = URI.parse(headers.fetch("location")).query
+
+    sign_in_status, sign_in_headers, = auth.handler.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: {
+          email: "resume@example.com",
+          password: "password123",
+          oauth_query: oauth_query
+        }
+      )
+    )
+
+    assert_equal 302, sign_in_status
+    params = Rack::Utils.parse_query(URI.parse(sign_in_headers.fetch("location")).query)
+    assert params["code"], "expected resumed authorization code redirect, got #{params.inspect}"
+    assert_equal "resume-state", params.fetch("state")
+  end
+
+  def test_invalid_signed_oauth_query_is_rejected_before_sign_in
+    auth = build_auth(scopes: ["openid"])
+    sign_up_cookie(auth, email: "invalid-query@example.com")
+
+    status, _headers, body = auth.handler.call(
+      rack_env(
+        "POST",
+        "/api/auth/sign-in/email",
+        body: {
+          email: "invalid-query@example.com",
+          password: "password123",
+          oauth_query: "client_id=invalid&sig=invalid"
+        }
+      )
+    )
+
+    assert_equal 400, status
+    assert_match(/invalid_signature/, body.join)
+  end
+
   def test_authorize_resolves_request_uri_and_discards_front_channel_params
     resolved = nil
     auth = build_auth(
@@ -310,5 +429,37 @@ class OAuthProviderAuthorizationRegistrationTest < Minitest::Test
 
     auth = build_auth(secondary_storage: storage, session: {store_session_in_database: true})
     assert auth.context
+  end
+
+  def test_config_rejects_client_registration_scopes_outside_provider_scopes
+    error = assert_raises(BetterAuth::APIError) do
+      build_auth(scopes: ["openid"], client_registration_allowed_scopes: ["openid", "admin"])
+    end
+    assert_match(/client_registration_allowed_scopes/i, error.message)
+
+    default_error = assert_raises(BetterAuth::APIError) do
+      build_auth(scopes: ["openid"], client_registration_default_scopes: ["profile"])
+    end
+    assert_match(/client_registration_default_scopes/i, default_error.message)
+  end
+
+  def test_config_rejects_refresh_grant_without_authorization_code_grant
+    error = assert_raises(BetterAuth::APIError) do
+      build_auth(grant_types: ["refresh_token"])
+    end
+
+    assert_match(/refresh_token/i, error.message)
+  end
+
+  def test_config_rejects_incompatible_jwt_and_secret_storage_options
+    hashed_error = assert_raises(BetterAuth::APIError) do
+      build_auth(disable_jwt_plugin: true, store_client_secret: "hashed")
+    end
+    assert_match(/hashed/i, hashed_error.message)
+
+    encrypted_error = assert_raises(BetterAuth::APIError) do
+      build_auth(disable_jwt_plugin: false, store_client_secret: "encrypted")
+    end
+    assert_match(/encrypted/i, encrypted_error.message)
   end
 end

@@ -36,6 +36,7 @@ module BetterAuth
     singleton_class.remove_method(:oauth_provider) if singleton_class.method_defined?(:oauth_provider) || singleton_class.private_method_defined?(:oauth_provider)
 
     def oauth_provider(options = {})
+      raw_options = normalize_hash(options)
       config = {
         login_page: "/login",
         consent_page: "/oauth2/consent",
@@ -59,17 +60,115 @@ module BetterAuth
         client_credential_grant_default_scopes: nil,
         scope_expirations: {},
         store: OAuthProtocol.stores
-      }.merge(normalize_hash(options))
+      }.merge(raw_options)
+
+      oauth_provider_validate_config!(config, raw_options)
 
       Plugin.new(
         id: "oauth-provider",
         version: BetterAuth::OAuthProvider::VERSION,
         init: oauth_provider_init(config),
+        hooks: oauth_provider_hooks(config),
         endpoints: oauth_provider_endpoints(config),
         schema: oauth_provider_schema,
         rate_limit: oauth_provider_rate_limits(config),
         options: config
       )
+    end
+
+    def oauth_provider_validate_config!(config, raw_options = {})
+      provider_scopes = OAuthProtocol.parse_scopes(config[:scopes])
+      [
+        [:client_registration_allowed_scopes, config[:client_registration_allowed_scopes]],
+        [:client_registration_default_scopes, config[:client_registration_default_scopes]]
+      ].each do |key, value|
+        next if value.nil?
+
+        missing = OAuthProtocol.parse_scopes(value) - provider_scopes
+        unless missing.empty?
+          raise APIError.new("BAD_REQUEST", message: "#{key} #{missing.first} not found in scopes")
+        end
+      end
+
+      grant_types = Array(config[:grant_types]).map(&:to_s)
+      if grant_types.include?(OAuthProtocol::REFRESH_GRANT) && !grant_types.include?(OAuthProtocol::AUTH_CODE_GRANT)
+        raise APIError.new("BAD_REQUEST", message: "refresh_token grant requires authorization_code grant")
+      end
+
+      store_client_secret = config[:store_client_secret]
+      if config[:disable_jwt_plugin] && raw_options.key?(:store_client_secret) && oauth_hashed_secret_storage?(store_client_secret)
+        raise APIError.new("BAD_REQUEST", message: "unable to store hashed secrets because id tokens will be signed with client secret")
+      end
+      if !config[:disable_jwt_plugin] && oauth_encrypted_secret_storage?(store_client_secret)
+        raise APIError.new("BAD_REQUEST", message: "encrypted secret storage is not recommended, please use hashed secret storage with the JWT plugin")
+      end
+    end
+
+    def oauth_hashed_secret_storage?(value)
+      mode = value.is_a?(Hash) ? normalize_hash(value) : value.to_s
+      mode == "hashed" || (mode.is_a?(Hash) && mode[:hash].respond_to?(:call))
+    end
+
+    def oauth_encrypted_secret_storage?(value)
+      mode = value.is_a?(Hash) ? normalize_hash(value) : value.to_s
+      mode == "encrypted" || (mode.is_a?(Hash) && (mode[:encrypt].respond_to?(:call) || mode[:decrypt].respond_to?(:call)))
+    end
+
+    def oauth_provider_hooks(config)
+      {
+        before: [
+          {
+            matcher: ->(ctx) { ctx.path.start_with?("/sign-in/", "/sign-up/") && !!oauth_query_from_body(ctx.body) },
+            handler: ->(ctx) { oauth_validate_query_hook!(ctx) }
+          }
+        ],
+        after: [
+          {
+            matcher: ->(ctx) { oauth_resume_after_session_cookie?(ctx) },
+            handler: ->(ctx) { oauth_resume_after_session_cookie(ctx, config) }
+          }
+        ]
+      }
+    end
+
+    def oauth_validate_query_hook!(ctx)
+      oauth_query = oauth_query_from_body(ctx.body)
+      return unless oauth_query
+
+      unless OAuthProvider::Utils.verify_oauth_query_params(oauth_query, ctx.context.secret)
+        raise APIError.new("BAD_REQUEST", message: "invalid_signature", body: {error: "invalid_signature"})
+      end
+
+      nil
+    end
+
+    def oauth_resume_after_session_cookie?(ctx)
+      return false unless oauth_query_from_body(ctx.body)
+      return false unless ctx.path.start_with?("/sign-in/", "/sign-up/")
+
+      ctx.response_headers["set-cookie"].to_s.include?(ctx.context.auth_cookies[:session_token].name)
+    end
+
+    def oauth_resume_after_session_cookie(ctx, config)
+      query = oauth_verified_query!(ctx, oauth_query_from_body(ctx.body))
+      ctx.context.set_current_session(ctx.context.new_session) if ctx.context.respond_to?(:set_current_session) && ctx.context.new_session
+      location = oauth_redirect_location { oauth_authorize_flow(ctx, config, query, continue_post_login: true) }
+      [302, Endpoint::Result.merge_headers(ctx.response_headers, {"location" => location}), [""]]
+    rescue APIError => error
+      raise APIError.new(
+        error.status,
+        message: error.message,
+        headers: Endpoint::Result.merge_headers(ctx.response_headers, error.headers),
+        code: error.code,
+        body: error.body
+      )
+    end
+
+    def oauth_query_from_body(body)
+      return nil unless body.is_a?(Hash)
+
+      data = OAuthProtocol.stringify_keys(body || {})
+      data["oauth_query"] || data["oauthQuery"]
     end
 
     def oauth_provider_init(config)

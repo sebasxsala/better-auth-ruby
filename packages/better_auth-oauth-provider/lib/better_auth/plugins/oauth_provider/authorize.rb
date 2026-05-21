@@ -68,7 +68,7 @@ module BetterAuth
         raise ctx.redirect(oauth_prompt_redirect(ctx, config, query, "login"))
       end
 
-      if prompts.include?("login") && !continue_post_login
+      if oauth_requires_login?(session, prompts, query) && !continue_post_login
         raise ctx.redirect(oauth_prompt_redirect(ctx, config, query, "login"))
       end
 
@@ -112,6 +112,21 @@ module BetterAuth
       end
 
       oauth_redirect_with_code(ctx, config, query, session, client, scopes, reference_id: consent_reference_id)
+    end
+
+    def oauth_requires_login?(session, prompts, query)
+      return true if prompts.include?("login")
+      return false unless query.key?("max_age")
+
+      max_age = Integer(query["max_age"])
+      return false if max_age.negative?
+
+      auth_time = OAuthProvider::Utils.resolve_session_auth_time(session)
+      return false unless auth_time
+
+      (Time.now - auth_time) > max_age
+    rescue ArgumentError, TypeError
+      false
     end
 
     def oauth_prompt_redirect(ctx, config, query, type, page: nil)

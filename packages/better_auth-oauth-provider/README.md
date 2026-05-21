@@ -182,3 +182,13 @@ Route OpenAPI metadata blocks from upstream TypeScript are intentionally not por
 The upstream `@better-auth/oauth-provider/client`, React/Solid client plugins, dashboard UI, and browser helpers are not ported. Ruby apps call the JSON endpoints directly or wrap `auth.api.*`.
 
 OIDC provider remains a core `better_auth` plugin because upstream still exposes it from `better-auth/plugins`. OAuth provider is the newer standalone provider package.
+
+## Development
+
+Run the package suite with:
+
+```sh
+rbenv exec bundle exec rake test
+```
+
+Adapter smoke tests skip when optional adapter gems or database services are not available. To install the optional adapter test bundle locally, enable Bundler's `adapter_test` group before running the suite.

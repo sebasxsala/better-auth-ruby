@@ -13,3 +13,12 @@ group :development, :test do
   gem "rake", "~> 13.2"
   gem "standardrb", "~> 1.0"
 end
+
+group :adapter_test, optional: true do
+  gem "better_auth-mongodb", path: "../better_auth-mongodb"
+  gem "mysql2", "~> 0.5"
+  gem "pg", "~> 1.5"
+  gem "sequel", "~> 5.83"
+  gem "sqlite3", "~> 2.0"
+  gem "tiny_tds", "~> 2.1"
+end
