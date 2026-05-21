@@ -69,6 +69,13 @@ class BetterAuthCookiesTest < Minitest::Test
     assert_nil tampered_ctx.get_signed_cookie("better-auth.session_token", SECRET)
   end
 
+  def test_parse_cookies_decodes_percent_encoded_values_without_rejecting_legacy_raw_values
+    cookies = BetterAuth::Cookies.parse_cookies("json=%7B%22prompt%22%3A%22login%3Bstrict%22%7D; legacy=raw%ZZvalue")
+
+    assert_equal "{\"prompt\":\"login;strict\"}", cookies.fetch("json")
+    assert_equal "raw%ZZvalue", cookies.fetch("legacy")
+  end
+
   def test_cookie_cache_compact_strategy_round_trips_and_validates_version
     auth = BetterAuth.auth(
       secret: SECRET,
@@ -86,6 +93,31 @@ class BetterAuthCookiesTest < Minitest::Test
     parsed = BetterAuth::Cookies.get_cookie_cache(cookie, secret: SECRET, strategy: "compact", version: "2")
     assert_equal "session-1", parsed["session"]["id"]
     assert_nil BetterAuth::Cookies.get_cookie_cache(cookie, secret: SECRET, strategy: "compact", version: "3")
+  end
+
+  def test_cookie_cache_uses_custom_session_data_cookie_name
+    auth = BetterAuth.auth(
+      base_url: "http://localhost:3000",
+      secret: SECRET,
+      email_and_password: {enabled: true},
+      session: {cookie_cache: {enabled: true, max_age: 120}},
+      advanced: {cookies: {session_data: {name: "custom.session_payload"}}}
+    )
+
+    status, headers, = auth.api.sign_up_email(
+      body: {email: "custom-cache@example.com", password: "password123", name: "Cached"},
+      as_response: true
+    )
+    assert_equal 200, status
+
+    cookie = headers.fetch("set-cookie").lines.map { |line| line.split(";").first }.join("; ")
+    session = auth.api.get_session(headers: {"cookie" => cookie})
+    user_id = session.fetch(:user).fetch("id")
+    auth.context.adapter.update(model: "user", where: [{field: "id", value: user_id}], update: {name: "Database"})
+
+    cached = auth.api.get_session(headers: {"cookie" => cookie})
+
+    assert_equal "Cached", cached.fetch(:user).fetch("name")
   end
 
   def test_cookie_cache_supports_compact_jwt_and_jwe_strategies

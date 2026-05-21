@@ -308,15 +308,41 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_includes connection.sql[2], 'WHERE "users"."id" = ?'
   end
 
-  RecordingConnection = Struct.new(:responses, :sql, :params) do
+  def test_sql_adapter_update_many_returns_count_for_non_returning_dialects_and_rejects_empty_updates
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new(2)
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :sqlite)
+
+    count = adapter.update_many(model: "user", where: [], update: {name: "Grace"})
+
+    assert_equal 2, count
+    assert_includes connection.sql.first, 'UPDATE "users" SET "name" = ?'
+    error = assert_raises(BetterAuth::APIError) do
+      adapter.update_many(model: "user", where: [], update: {unknown: "field"})
+    end
+    assert_equal "No fields to update", error.message
+  end
+
+  RecordingConnection = Struct.new(:responses, :sql, :params, :last_affected_rows) do
     def initialize(*responses)
-      super(responses, [], [])
+      super(responses, [], [], nil)
     end
 
     def exec_params(statement, bind_params)
       sql << statement
       params << bind_params
-      responses.shift || []
+      response = responses.shift || []
+      if response.is_a?(Integer)
+        self.last_affected_rows = response
+        []
+      else
+        self.last_affected_rows = nil
+        response
+      end
+    end
+
+    def affected_rows
+      last_affected_rows || 0
     end
   end
 end

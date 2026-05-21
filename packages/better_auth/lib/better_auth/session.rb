@@ -45,7 +45,8 @@ module BetterAuth
         strategy: config[:strategy] || "compact",
         version: config[:version],
         cookie_prefix: ctx.context.options.advanced[:cookie_prefix] || "better-auth",
-        is_secure: ctx.context.auth_cookies[:session_data].name.start_with?(Cookies::SECURE_COOKIE_PREFIX)
+        is_secure: ctx.context.auth_cookies[:session_data].name.start_with?(Cookies::SECURE_COOKIE_PREFIX),
+        cookie_full_name: ctx.context.auth_cookies[:session_data].name
       )
       return nil unless payload
       return nil if payload["session"]["token"] && payload["session"]["token"] != token

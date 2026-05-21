@@ -38,6 +38,42 @@ class BetterAuthEndpointTest < Minitest::Test
     assert_equal ["session=value", "method=email"], headers["set-cookie"].map { |line| line.split(";").first }
   end
 
+  def test_set_cookie_header_behaves_like_string_for_direct_response_assertions
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    endpoint = BetterAuth::Endpoint.new(path: "/cookies", method: "GET") do |ctx|
+      ctx.set_cookie("session", "value")
+      ctx.set_cookie("method", "email")
+
+      {ok: true}
+    end
+
+    result = endpoint.call(context_for(auth, endpoint))
+    header = result.to_response.headers.fetch("set-cookie")
+
+    assert_match(/session=value/, header)
+    assert_equal "session=value", header.split("\n").first.split(";").first
+    assert_equal header.to_s, header.to_str
+  end
+
+  def test_signed_cookie_round_trips_json_with_cookie_separators
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    payload = JSON.generate({"prompt" => "login", "returnTo" => "/dashboard?x=1;y=2"})
+    setter = BetterAuth::Endpoint.new(path: "/cookie", method: "GET") do |ctx|
+      ctx.set_signed_cookie("oidc_login_prompt", payload, SECRET)
+      {ok: true}
+    end
+
+    set_result = setter.call(context_for(auth, setter))
+    cookie = set_result.to_response.headers.fetch("set-cookie").split(";").first
+    reader = BetterAuth::Endpoint.new(path: "/read", method: "GET") do |ctx|
+      ctx.get_signed_cookie("oidc_login_prompt", SECRET)
+    end
+
+    read_result = reader.call(context_for(auth, reader, headers: {"cookie" => cookie}))
+
+    assert_equal payload, read_result.response
+  end
+
   def test_endpoint_preserves_raw_rack_responses
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     endpoint = BetterAuth::Endpoint.new(path: "/raw", method: "GET") do

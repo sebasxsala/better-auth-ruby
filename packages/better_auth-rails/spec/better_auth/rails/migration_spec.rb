@@ -11,7 +11,7 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     expect(migration).to include("class CreateBetterAuthTables < ActiveRecord::Migration")
     expect(migration).to include("create_table :users, id: false")
-    expect(migration).to include("t.string :id, null: false")
+    expect(migration).to include("t.string :id, limit: 191, null: false")
     expect(migration).to include("ALTER TABLE \#{quote_table_name(:users)} ADD PRIMARY KEY")
     expect(migration).to include("t.boolean :email_verified, null: false, default: false")
     expect(migration).to include("add_index :users, :email, unique: true")
@@ -25,8 +25,8 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("t.text :refresh_token")
     expect(migration).to include("t.text :id_token")
     expect(migration).to include("t.text :value, null: false")
-    expect(migration).to include("t.string :token, null: false")
-    expect(migration).to include("t.string :user_id, null: false")
+    expect(migration).to include("t.string :token, limit: 191, null: false")
+    expect(migration).to include("t.string :user_id, limit: 191, null: false")
   end
 
   it "renders string fields with defaults as bounded strings" do
@@ -42,7 +42,7 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     migration = described_class.render(default_config)
 
-    expect(migration).to include("t.string :role, default: \"member\"")
+    expect(migration).to include("t.string :role, limit: 191, default: \"member\"")
     expect(migration).not_to include("t.text :role, default: \"member\"")
   end
 
@@ -56,7 +56,7 @@ RSpec.describe BetterAuth::Rails::Migration do
     migration = described_class.render(rate_limit_config)
 
     expect(migration).to include("create_table :rate_limits, id: false")
-    expect(migration).to include("t.string :key, null: false")
+    expect(migration).to include("t.string :key, limit: 191, null: false")
     expect(migration).to include("add_index :rate_limits, :key, unique: true")
     expect(migration).not_to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
   end
@@ -86,8 +86,8 @@ RSpec.describe BetterAuth::Rails::Migration do
     migration = described_class.render(plugin_config)
 
     expect(migration).to include("create_table :audit_logs, id: false")
-    expect(migration).to include("t.string :user_id")
-    expect(migration).to include("t.string :action, null: false")
+    expect(migration).to include("t.string :user_id, limit: 191")
+    expect(migration).to include("t.string :action, limit: 191, null: false")
     expect(migration).to include("t.integer :attempts, null: false, default: 0")
     expect(migration).to include("t.datetime :created_at, null: false")
     expect(migration).to include("add_index :audit_logs, :user_id")
@@ -180,9 +180,9 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("create_table :team_members, id: false")
     expect(migration).to include("create_table :organization_roles, id: false")
     expect(migration).to include("create_table :passkeys, id: false")
-    expect(migration).to include("t.string :active_organization_id")
-    expect(migration).to include("t.string :active_team_id")
-    expect(migration).to include("t.string :credential_id, null: false")
+    expect(migration).to include("t.string :active_organization_id, limit: 191")
+    expect(migration).to include("t.string :active_team_id, limit: 191")
+    expect(migration).to include("t.string :credential_id, limit: 191, null: false")
     expect(migration).to include("add_index :passkeys, :user_id")
   end
 
@@ -226,7 +226,7 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     expect(migration).to include("class UpdateBetterAuthTables < ActiveRecord::Migration")
     expect(migration).to include("create_table :audit_logs, id: false")
-    expect(migration).to include("add_column :users, :role, :string")
+    expect(migration).to include("add_column :users, :role, :string, limit: 191")
     expect(migration).to include("add_index :users, :role")
     expect(migration).not_to include("create_table :users")
   end

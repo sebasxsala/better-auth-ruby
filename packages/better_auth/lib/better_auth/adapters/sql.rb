@@ -63,6 +63,7 @@ module BetterAuth
 
       def update(model:, where:, update:)
         model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         if dialect == :postgres
           records = update_many(model: model, where: where, update: update, returning: true)
           return records.is_a?(Array) ? records.first : records
@@ -77,7 +78,9 @@ module BetterAuth
 
       def update_many(model:, where:, update:, returning: false)
         model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         data = transform_input(model, update, "update", true)
+        ensure_update_data!(data)
         params = []
         assignments = data.each_key.map do |field|
           params << data[field]
@@ -93,7 +96,7 @@ module BetterAuth
         rows = execute(sql, params).map { |row| normalize_record(model, row) }
         return rows if returning || dialect == :postgres
 
-        nil
+        affected_rows(rows)
       end
 
       def delete(model:, where:)
@@ -166,6 +169,23 @@ module BetterAuth
 
         output["id"] = generated_id if action == "create" && !output.key?("id")
         output
+      end
+
+      def ensure_update_data!(data)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") if data.empty?
+      end
+
+      def ensure_update_input_has_fields!(model, update)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless update.is_a?(Hash)
+
+        fields = schema_for(model).fetch(:fields)
+        input = stringify_keys(update)
+        has_updatable_field = input.any? do |field, _value|
+          next false if field == "id" || field == "_id"
+
+          fields.key?(field) || fields.any? { |logical_field, attributes| storage_key(attributes[:field_name] || logical_field) == field }
+        end
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless has_updatable_field
       end
 
       def select_sql(model, select, join)
@@ -329,6 +349,7 @@ module BetterAuth
       def affected_rows(result)
         return result.cmd_tuples if result.respond_to?(:cmd_tuples)
         return result.affected_rows if result.respond_to?(:affected_rows)
+        return connection.affected_rows if connection.respond_to?(:affected_rows)
         return connection.changes if connection.respond_to?(:changes)
         return result.to_i if result.respond_to?(:to_i)
 

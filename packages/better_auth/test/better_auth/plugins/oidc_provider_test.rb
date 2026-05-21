@@ -648,6 +648,7 @@ class BetterAuthPluginsOIDCProviderTest < Minitest::Test
     assert_match %r{\A/oauth2/authorize\?}, login_headers.fetch("location")
     assert_includes login_headers.fetch("location"), "consent_code="
     assert_match(/oidc_login_prompt=; .*Max-Age=0/, login_headers.fetch("set-cookie"))
+    assert_match(/better-auth\.session_token=/, login_headers.fetch("set-cookie"))
   end
 
   private

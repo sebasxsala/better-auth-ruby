@@ -229,6 +229,23 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     expect(relation.update_all_calls).to include(a_hash_including("name" => "Ada"))
   end
 
+  it "returns update_many count and rejects empty updates" do
+    relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new("id" => "user-1", "email" => "ada@example.com", "email_verified" => false),
+        BetterAuthRailsFakeRecord.new("id" => "user-2", "email" => "ada@example.com", "email_verified" => false)
+      ]
+    )
+    adapter.send(:model_class, "user").relation = relation
+
+    count = adapter.update_many(model: "user", where: [{field: "email", value: "ada@example.com"}], update: {name: "Ada"})
+
+    expect(count).to eq(2)
+    expect {
+      adapter.update_many(model: "user", where: [], update: {unknown: "field"})
+    }.to raise_error(BetterAuth::APIError, /No fields to update/)
+  end
+
   it "deletes every row matching a predicate" do
     relation = BetterAuthRailsFakeRelation.new(
       [

@@ -91,6 +91,19 @@ class BetterAuthMemoryAdapterTest < Minitest::Test
     assert_nil @adapter.find_one(model: "user", where: [{field: "id", value: user["id"]}])
   end
 
+  def test_update_many_returns_count_and_rejects_empty_updates
+    @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    @adapter.create(model: "user", data: {id: "user-2", name: "Alan", email: "alan@example.com"}, force_allow_id: true)
+
+    count = @adapter.update_many(model: "user", where: [], update: {image: "avatar.png"})
+
+    assert_equal 2, count
+    error = assert_raises(BetterAuth::APIError) do
+      @adapter.update_many(model: "user", where: [], update: {unknown: "field"})
+    end
+    assert_equal "No fields to update", error.message
+  end
+
   def test_find_one_with_join_returns_related_user
     user = @adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
     session = @adapter.create(

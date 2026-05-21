@@ -56,6 +56,7 @@ module BetterAuth
 
       def update(model:, where:, update:)
         model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         existing = find_one(model: model, where: where, select: ["id"])
         return nil unless existing
 
@@ -65,7 +66,10 @@ module BetterAuth
 
       def update_many(model:, where:, update:, returning: false)
         model = model.to_s
-        attributes = physical_attributes(model, transform_input(model, update, "update", true))
+        ensure_update_input_has_fields!(model, update)
+        data = transform_input(model, update, "update", true)
+        ensure_update_data!(data)
+        attributes = physical_attributes(model, data)
         relation = relation_for(model, where: where)
         if returning
           relation.map do |record|
@@ -230,6 +234,23 @@ module BetterAuth
         end
         output["id"] = generated_id if action == "create" && !output.key?("id") && fields.key?("id")
         output
+      end
+
+      def ensure_update_data!(data)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") if data.empty?
+      end
+
+      def ensure_update_input_has_fields!(model, update)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless update.is_a?(Hash)
+
+        fields = schema_for(model).fetch(:fields)
+        input = stringify_keys(update)
+        has_updatable_field = input.any? do |field, _value|
+          next false if field == "id" || field == "_id"
+
+          fields.key?(field) || fields.any? { |logical_field, attributes| storage_key(attributes[:field_name] || logical_field) == field }
+        end
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless has_updatable_field
       end
 
       def physical_attributes(model, logical)

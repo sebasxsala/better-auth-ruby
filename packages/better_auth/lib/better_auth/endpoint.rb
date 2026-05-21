@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "uri"
 
 module BetterAuth
   class Endpoint
@@ -222,8 +223,24 @@ module BetterAuth
           self
         end
 
+        def match(...)
+          to_s.match(...)
+        end
+
+        def =~(pattern)
+          to_s =~ pattern
+        end
+
+        def split(...)
+          to_s.split(...)
+        end
+
         def to_s
           join("\n")
+        end
+
+        def to_str
+          to_s
         end
       end
 
@@ -356,7 +373,7 @@ module BetterAuth
 
       def set_cookie(name, value, options = {})
         attributes = cookie_attributes(options)
-        cookie = (["#{name}=#{value}"] + attributes).join("; ")
+        cookie = (["#{name}=#{URI.encode_uri_component(value.to_s)}"] + attributes).join("; ")
         set_header("set-cookie", cookie)
       end
 

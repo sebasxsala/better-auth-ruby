@@ -67,7 +67,7 @@ module BetterAuth
         name, value = pair.split("=", 2)
         next if name.to_s.empty? || value.nil?
 
-        result[name.strip] = value.strip
+        result[name.strip] = decode_cookie_value(value.strip)
       end
     end
 
@@ -150,12 +150,14 @@ module BetterAuth
       Crypto.symmetric_decode_jwt(value, ctx.context.secret_config, "better-auth-account")
     end
 
-    def get_cookie_cache(request_or_cookie_header, secret:, strategy: "compact", version: nil, cookie_prefix: "better-auth", cookie_name: "session_data", is_secure: nil)
+    def get_cookie_cache(request_or_cookie_header, secret:, strategy: "compact", version: nil, cookie_prefix: "better-auth", cookie_name: "session_data", is_secure: nil, cookie_full_name: nil)
       cookie_header = header_value(request_or_cookie_header)
       return nil if cookie_header.to_s.empty?
 
       parsed = parse_cookies(cookie_header)
-      name = if is_secure.nil?
+      name = if cookie_full_name
+        cookie_full_name
+      elsif is_secure.nil?
         production_environment? ? "#{SECURE_COOKIE_PREFIX}#{cookie_prefix}.#{cookie_name}" : "#{cookie_prefix}.#{cookie_name}"
       else
         secure_prefix = is_secure ? SECURE_COOKIE_PREFIX : ""
@@ -246,6 +248,12 @@ module BetterAuth
       return nil if chunks.empty?
 
       chunks.sort_by(&:first).map(&:last).join
+    end
+
+    def decode_cookie_value(value)
+      URI.decode_uri_component(value)
+    rescue ArgumentError
+      value
     end
 
     def header_value(request_or_cookie_header)

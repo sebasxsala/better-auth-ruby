@@ -5,6 +5,8 @@ require "better_auth/sql_migration"
 module BetterAuth
   module Rails
     module Migration
+      BOUNDED_STRING_LIMIT = 191
+
       module_function
 
       def render(options, migration_version: nil)
@@ -113,12 +115,13 @@ module BetterAuth
       def column_line(logical_field, attributes)
         column = attributes[:field_name] || physical_name(logical_field)
         parts = ["t.#{rails_type(logical_field, attributes)} :#{column}"]
-        parts.concat(column_options(attributes))
+        parts.concat(column_options(logical_field, attributes))
         "      #{parts.join(", ")}"
       end
 
-      def column_options(attributes)
+      def column_options(logical_field, attributes)
         parts = []
+        parts << "limit: #{BOUNDED_STRING_LIMIT}" if limited_string?(logical_field, attributes)
         parts << "null: false" if attributes[:required]
         default = default_value(attributes)
         parts << "default: #{default}" unless default.nil?
@@ -139,7 +142,7 @@ module BetterAuth
         change.fields.map do |logical_field, attributes|
           column = attributes[:field_name] || physical_name(logical_field)
           parts = ["    add_column :#{change.table_name}, :#{column}, :#{rails_type(logical_field, attributes)}"]
-          parts.concat(column_options(attributes))
+          parts.concat(column_options(logical_field, attributes))
           parts.join(", ")
         end
       end
@@ -190,6 +193,10 @@ module BetterAuth
           attributes[:sortable] ||
           attributes[:references] ||
           attributes.key?(:default_value)
+      end
+
+      def limited_string?(logical_field, attributes)
+        attributes[:type] == "string" && bounded_string?(logical_field, attributes)
       end
 
       def default_value(attributes)

@@ -7,11 +7,11 @@ class BetterAuthPostgresAdapterTest < Minitest::Test
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_postgres_adapter_can_be_instantiated_without_rails
-    adapter = BetterAuth::Adapters::Postgres.new(url: "postgres://user:password@localhost:5432/better_auth")
+    connection = Object.new
+    adapter = BetterAuth::Adapters::Postgres.new(connection: connection)
 
     assert_equal :postgres, adapter.dialect
-  rescue LoadError
-    skip "pg gem is not installed"
+    assert_same connection, adapter.connection
   end
 
   def test_postgres_adapter_runs_core_crud_against_docker_service

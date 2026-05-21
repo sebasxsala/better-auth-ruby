@@ -35,17 +35,23 @@ module BetterAuth
       end
 
       def update(model:, where:, update:)
+        model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         records = table_for(model).select { |record| matches_where?(record, where || []) }
-        data = transform_input(model.to_s, update, "update", true)
+        data = transform_input(model, update, "update", true)
+        ensure_update_data!(data)
         records.each { |record| record.merge!(data) }
         records.first
       end
 
       def update_many(model:, where:, update:)
+        model = model.to_s
+        ensure_update_input_has_fields!(model, update)
         records = table_for(model).select { |record| matches_where?(record, where || []) }
-        data = transform_input(model.to_s, update, "update", true)
+        data = transform_input(model, update, "update", true)
+        ensure_update_data!(data)
         records.each { |record| record.merge!(data) }
-        records.first
+        records.length
       end
 
       def delete(model:, where:)
@@ -114,6 +120,23 @@ module BetterAuth
 
         output["id"] = generated_id if action == "create" && !output.key?("id")
         output
+      end
+
+      def ensure_update_data!(data)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") if data.empty?
+      end
+
+      def ensure_update_input_has_fields!(model, update)
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless update.is_a?(Hash)
+
+        fields = Schema.auth_tables(options).fetch(model).fetch(:fields)
+        input = stringify_keys(update)
+        has_updatable_field = input.any? do |field, _value|
+          next false if field == "id" || field == "_id"
+
+          fields.key?(field) || fields.any? { |logical_field, attributes| Schema.storage_key(attributes[:field_name] || logical_field) == field }
+        end
+        raise APIError.new("BAD_REQUEST", message: "No fields to update") unless has_updatable_field
       end
 
       def generated_id
