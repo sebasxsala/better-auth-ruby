@@ -78,6 +78,24 @@ class BetterAuthAPIKeyRoutesIndexTest < Minitest::Test
     refute_nil auth.context.adapter.find_one(model: "apikey", where: [{field: "id", value: no_expiry.fetch("id")}])
   end
 
+  def test_delete_expired_uses_sql_null_predicates_for_database_adapters
+    options = BetterAuth::Configuration.new(
+      secret: "api-key-sql-null-predicate-secret",
+      database: :memory,
+      plugins: [BetterAuth::Plugins.api_key]
+    )
+    connection = RecordingSQLConnection.new
+    adapter = BetterAuth::Adapters::SQL.new(options, connection: connection, dialect: :mssql)
+    context = Struct.new(:adapter, :logger).new(adapter, nil)
+    config = BetterAuth::APIKey::Configuration.normalize({})
+
+    BetterAuth::APIKey::Routes.delete_expired(context, config, bypass_last_check: true)
+
+    assert_includes connection.sql.first, "[api_keys].[expires_at] < ?"
+    assert_includes connection.sql.first, "[api_keys].[expires_at] IS NOT NULL"
+    assert_equal 1, connection.params.first.length
+  end
+
   def test_deferred_schedule_cleanup_logs_failures
     deferred = []
     errors = []
@@ -150,5 +168,17 @@ class BetterAuthAPIKeyRoutesIndexTest < Minitest::Test
       requestCount: 0,
       permissions: nil
     }
+  end
+
+  RecordingSQLConnection = Struct.new(:sql, :params) do
+    def initialize
+      super([], [])
+    end
+
+    def exec_params(statement, bind_params)
+      sql << statement
+      params << bind_params
+      []
+    end
   end
 end

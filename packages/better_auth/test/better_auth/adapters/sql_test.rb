@@ -275,6 +275,24 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     refute_includes connection.sql.first, "LIMIT"
   end
 
+  def test_sql_adapter_uses_null_predicates_for_nil_where_values
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :mssql)
+
+    adapter.find_many(
+      model: "user",
+      where: [
+        {field: "image", value: nil},
+        {field: "emailVerified", operator: "ne", value: nil}
+      ]
+    )
+
+    assert_includes connection.sql.first, "[users].[image] IS NULL"
+    assert_includes connection.sql.first, "[users].[email_verified] IS NOT NULL"
+    assert_empty connection.params.first
+  end
+
   def test_sql_adapter_rejects_input_false_fields_without_force_allow_id
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([])

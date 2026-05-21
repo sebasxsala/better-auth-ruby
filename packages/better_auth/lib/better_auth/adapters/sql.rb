@@ -251,27 +251,32 @@ module BetterAuth
           value = fetch_key(clause, :value)
           attributes = schema_for(model).fetch(:fields).fetch(field)
 
-          expression = case operator
-          when "in", "not_in"
-            values = Array(value).map { |entry| coerce_where_value(entry, attributes) }
-            placeholders = values.map do |entry|
-              params << entry
-              placeholder(params.length)
-            end.join(", ")
-            sql_operator = (operator == "not_in") ? "NOT IN" : "IN"
-            "#{column} #{sql_operator} (#{placeholders})"
-          when "contains", "starts_with", "ends_with"
-            escaped = escape_like(value)
-            pattern = case operator
-            when "starts_with" then "#{escaped}%"
-            when "ends_with" then "%#{escaped}"
-            else "%#{escaped}%"
-            end
-            params << pattern
-            "#{column} LIKE #{placeholder(params.length)} ESCAPE #{escape_literal}"
+          expression = if value.nil? && %w[eq ne].include?(operator)
+            null_operator = (operator == "ne") ? "IS NOT NULL" : "IS NULL"
+            "#{column} #{null_operator}"
           else
-            params << coerce_where_value(value, attributes)
-            "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
+            case operator
+            when "in", "not_in"
+              values = Array(value).map { |entry| coerce_where_value(entry, attributes) }
+              placeholders = values.map do |entry|
+                params << entry
+                placeholder(params.length)
+              end.join(", ")
+              sql_operator = (operator == "not_in") ? "NOT IN" : "IN"
+              "#{column} #{sql_operator} (#{placeholders})"
+            when "contains", "starts_with", "ends_with"
+              escaped = escape_like(value)
+              pattern = case operator
+              when "starts_with" then "#{escaped}%"
+              when "ends_with" then "%#{escaped}"
+              else "%#{escaped}%"
+              end
+              params << pattern
+              "#{column} LIKE #{placeholder(params.length)} ESCAPE #{escape_literal}"
+            else
+              params << coerce_where_value(value, attributes)
+              "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
+            end
           end
 
           connector = (index.positive? && fetch_key(clause, :connector).to_s.upcase == "OR") ? "OR" : "AND"

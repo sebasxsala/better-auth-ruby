@@ -57,10 +57,10 @@ module BetterAuth
             order: table[:order] || Float::INFINITY
           )
           table.fetch(:fields).each do |field, attributes|
-            next unless attributes[:index]
+            next unless indexable_field?(attributes, dialect)
 
             column = attributes[:field_name] || physical_name(field)
-            to_index << index_change(table_name, column, attributes, unique: false)
+            to_index << index_change(table_name, column, attributes, dialect: dialect, unique: !!attributes[:unique])
           end
           next
         end
@@ -78,7 +78,7 @@ module BetterAuth
           next unless attributes[:index] || attributes[:unique]
           next if index_present?(existing_table, column, unique: !!attributes[:unique])
 
-          to_index << index_change(table_name, column, attributes, unique: !!attributes[:unique])
+          to_index << index_change(table_name, column, attributes, dialect: dialect, unique: !!attributes[:unique])
         end
 
         next if missing_fields.empty?
@@ -452,14 +452,26 @@ module BetterAuth
       {names: Set.new, columns: Set.new, unique_columns: Set.new}
     end
 
-    def index_change(table_name, column, attributes, unique:)
+    def index_change(table_name, column, attributes, dialect:, unique:)
       BetterAuth::MigrationPlan::IndexChange.new(
         table_name: table_name,
         field_name: column,
-        name: "index_#{table_name}_on_#{column}",
+        name: index_name(table_name, column, attributes, dialect),
         unique: unique,
         field: attributes
       )
+    end
+
+    def indexable_field?(attributes, dialect)
+      attributes[:index] || filtered_unique_index?(attributes, dialect)
+    end
+
+    def filtered_unique_index?(attributes, dialect)
+      dialect == :mssql && attributes[:unique] && !attributes[:required]
+    end
+
+    def index_name(table_name, column, attributes, dialect)
+      filtered_unique_index?(attributes, dialect) ? "uniq_#{table_name}_#{column}" : "index_#{table_name}_on_#{column}"
     end
 
     def index_present?(table, column, unique:)

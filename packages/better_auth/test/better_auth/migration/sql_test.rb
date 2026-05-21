@@ -161,6 +161,40 @@ class BetterAuthMigrationSQLTest < Minitest::Test
     assert_equal ["index_api_keys_on_user_id"], plan.to_index.map(&:name)
   end
 
+  def test_mssql_pending_migration_preserves_filtered_unique_indexes_for_nullable_fields
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.phone_number]
+    )
+
+    plan = BetterAuth::SQLMigration.plan_from_existing(
+      config,
+      existing: {
+        "users" => {
+          name: "users",
+          columns: {
+            "id" => "varchar",
+            "name" => "varchar",
+            "email" => "varchar",
+            "email_verified" => "smallint",
+            "image" => "varchar",
+            "created_at" => "datetime2",
+            "updated_at" => "datetime2",
+            "phone_number" => "varchar",
+            "phone_number_verified" => "smallint"
+          },
+          indexes: BetterAuth::SQLMigration.empty_index_metadata
+        }
+      },
+      dialect: :mssql
+    )
+    sql = BetterAuth::Schema::SQL.pending_statements(plan).join("\n")
+
+    assert_includes sql, "CREATE UNIQUE INDEX [uniq_users_phone_number] ON [users] ([phone_number]) WHERE [phone_number] IS NOT NULL"
+    refute_includes sql, "CONSTRAINT [uniq_users_phone_number] UNIQUE ([phone_number])"
+  end
+
   def test_warns_on_type_mismatch_without_planning_destructive_alter
     connection = SQLite3::Database.new(":memory:")
     connection.results_as_hash = true
