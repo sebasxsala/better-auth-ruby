@@ -88,7 +88,7 @@ RSpec.describe BetterAuth::Generators::MigrationGenerator do
     migrations = Dir[File.join(path, "*.rb")]
     update = migrations.find { |file| File.basename(file).include?("update_better_auth_tables") }
     expect(migrations.length).to eq(2)
-    expect(File.read(update)).to include("create_table :api_keys, id: false")
+    expect(File.read(update)).to include("create_table :api_keys, id: :string")
     expect(File.read(update)).not_to include("create_table :users")
   ensure
     BetterAuth::Rails.instance_variable_set(:@auth, nil)
@@ -119,7 +119,7 @@ RSpec.describe BetterAuth::Generators::MigrationGenerator do
     described_class.start([], destination_root: @destination)
 
     migration = File.read(Dir[File.join(@destination, "db/migrate/*_create_better_auth_tables.rb")].first)
-    expect(migration).to include("create_table :api_keys, id: false")
+    expect(migration).to include("create_table :api_keys, id: :string")
     expect(migration).to include("add_index :api_keys, :key, unique: true")
     expect(migration).to include("add_foreign_key :api_keys, :users, column: :user_id")
   ensure

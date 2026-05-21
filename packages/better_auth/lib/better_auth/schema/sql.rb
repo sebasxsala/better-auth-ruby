@@ -82,6 +82,7 @@ module BetterAuth
         table_name = table.fetch(:model_name)
         table.fetch(:fields).filter_map do |logical_field, attributes|
           nullable_unique_mssql = dialect == :mssql && attributes[:unique] && logical_field != "id" && !attributes[:required]
+          next if attributes[:unique] && !nullable_unique_mssql
           next unless attributes[:index] || nullable_unique_mssql
 
           column = attributes[:field_name] || Schema.physical_name(logical_field)

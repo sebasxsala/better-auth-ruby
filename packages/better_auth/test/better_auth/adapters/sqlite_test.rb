@@ -59,6 +59,61 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
     skip "sqlite3 gem is not installed"
   end
 
+  def test_sqlite_adapter_persists_social_id_token_sign_in
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-social", ".sqlite3"]) do |file|
+      config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      connection.execute("PRAGMA foreign_keys = ON")
+      create_schema(connection, config)
+
+      auth = BetterAuth.auth(
+        base_url: "http://localhost:3000",
+        secret: SECRET,
+        database: ->(options) { BetterAuth::Adapters::SQLite.new(options, connection: connection) },
+        social_providers: {
+          github: {
+            id: "github",
+            verify_id_token: ->(_token, _nonce = nil) { true },
+            get_user_info: ->(_tokens) {
+              {
+                user: {
+                  id: "sqlite-gh-1",
+                  email: "sqlite-social@example.com",
+                  name: "SQLite Social",
+                  image: "https://example.com/sqlite.png",
+                  emailVerified: true
+                }
+              }
+            }
+          }
+        },
+        session: {cookie_cache: {enabled: false}}
+      )
+
+      status, headers, body = auth.api.sign_in_social(
+        body: {provider: "github", idToken: {token: "id-token", accessToken: "access-token"}},
+        as_response: true
+      )
+      payload = JSON.parse(body.join)
+      user_id = payload.fetch("user").fetch("id")
+      token = payload.fetch("token")
+
+      assert_equal 200, status
+      assert_includes headers.fetch("set-cookie"), "better-auth.session_token="
+      assert_equal "sqlite-social@example.com", direct_sqlite_value(connection, %(SELECT email FROM "users" WHERE id = ?), user_id)
+      assert_equal "sqlite-gh-1", direct_sqlite_value(connection, %(SELECT account_id FROM "accounts" WHERE user_id = ?), user_id)
+      assert_equal "github", direct_sqlite_value(connection, %(SELECT provider_id FROM "accounts" WHERE user_id = ?), user_id)
+      assert_equal user_id, direct_sqlite_value(connection, %(SELECT user_id FROM "sessions" WHERE token = ?), token)
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
   def test_sqlite_adapter_round_trips_json_and_array_fields
     require "sqlite3"
 
@@ -162,6 +217,67 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
 
       session = adapter.find_one(model: "session", where: [{field: "token", value: binary_token}])
       assert_equal token, session.fetch("token")
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
+  def test_sqlite_adapter_creates_plugin_records_when_schema_does_not_declare_id
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-plugin-id", ".sqlite3"]) do |file|
+      plugin = BetterAuth::Plugin.new(
+        id: "plugin-id",
+        schema: {
+          auditLog: {
+            model_name: "audit_logs",
+            fields: {
+              action: {type: "string", required: true, unique: true},
+              createdAt: {type: "date", required: true}
+            }
+          }
+        }
+      )
+      config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      create_schema(connection, config)
+      adapter = BetterAuth::Adapters::SQLite.new(config, connection: connection)
+
+      record = adapter.create(model: "auditLog", data: {action: "created", createdAt: Time.now})
+
+      assert record.fetch("id")
+      assert_equal "created", record.fetch("action")
+      assert_equal record.fetch("id"), direct_sqlite_value(connection, %(SELECT id FROM "audit_logs" WHERE action = ?), "created")
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
+  def test_sqlite_adapter_persists_database_rate_limit_table_without_id_column
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-rate-limit", ".sqlite3"]) do |file|
+      config = BetterAuth::Configuration.new(
+        secret: SECRET,
+        database: :memory,
+        rate_limit: {storage: "database"}
+      )
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      create_schema(connection, config)
+      adapter = BetterAuth::Adapters::SQLite.new(config, connection: connection)
+
+      record = adapter.create(model: "rateLimit", data: {key: "ip:127.0.0.1", count: 1, lastRequest: 123})
+      updated = adapter.update(model: "rateLimit", where: [{field: "key", value: "ip:127.0.0.1"}], update: {count: 2})
+
+      assert_equal "ip:127.0.0.1", record.fetch("key")
+      refute record.key?("id")
+      assert_equal 2, updated.fetch("count")
     ensure
       connection&.close
     end
