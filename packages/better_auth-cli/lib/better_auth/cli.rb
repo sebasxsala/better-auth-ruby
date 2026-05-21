@@ -20,7 +20,7 @@ module BetterAuth
 
       def run(argv = ARGV, stdout: $stdout, stderr: $stderr)
         new(argv, stdout: stdout, stderr: stderr).run
-      rescue Error, BetterAuth::SQLMigration::UnsupportedAdapterError, BetterAuth::Error => error
+      rescue Error, BetterAuth::SQLMigration::UnsupportedAdapterError, BetterAuth::Error, OptionParser::ParseError => error
         stderr.puts error.message
         1
       end
@@ -140,6 +140,7 @@ module BetterAuth
         stdout.puts "No MongoDB indexes needed."
       else
         indexes.each do |index|
+          validate_mongo_index!(index)
           unique = index[:unique] ? " unique" : ""
           stdout.puts "ensured#{unique} index #{index[:collection]}.#{index[:field]}"
         end
@@ -188,13 +189,19 @@ module BetterAuth
       self.class.configure(nil)
       result = TOPLEVEL_BINDING.eval(File.read(path), path)
       value = normalize_config_value(result) || self.class.configuration
-      raise Error, "Config file must return a Hash or BetterAuth::Configuration" unless value
+      raise Error, "Config file must return a Hash, BetterAuth::Configuration, or BetterAuth::Auth" unless value
 
       BetterAuth::SQLMigration.configuration_for(value)
     end
 
     def normalize_config_value(value)
       value if value.is_a?(Hash) || value.is_a?(BetterAuth::Configuration) || value.is_a?(BetterAuth::Auth)
+    end
+
+    def validate_mongo_index!(index)
+      return if index[:collection] && index[:field]
+
+      raise Error, "MongoDB index metadata must include collection and field"
     end
 
     def sql_adapter_for(config)
