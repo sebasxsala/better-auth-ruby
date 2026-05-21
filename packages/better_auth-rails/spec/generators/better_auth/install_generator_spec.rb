@@ -31,7 +31,7 @@ RSpec.describe BetterAuth::Generators::InstallGenerator do
     expect(initializer_contents).to include("config.plugins")
     expect(initializer_contents).to include("config.hooks do |hooks|")
     expect(migrations.length).to eq(1)
-    expect(File.read(migrations.first)).to include("create_table :users, id: false")
+    expect(File.read(migrations.first)).to include("create_table :users, id: :string")
   end
 
   it "does not overwrite an existing initializer" do

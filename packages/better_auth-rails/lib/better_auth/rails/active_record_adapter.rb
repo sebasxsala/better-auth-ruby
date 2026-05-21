@@ -57,11 +57,12 @@ module BetterAuth
       def update(model:, where:, update:)
         model = model.to_s
         ensure_update_input_has_fields!(model, update)
-        existing = find_one(model: model, where: where, select: ["id"])
+        existing = find_one(model: model, where: where)
         return nil unless existing
 
         update_many(model: model, where: where, update: update)
-        find_one(model: model, where: [{field: "id", value: existing.fetch("id")}])
+        lookup = record_lookup(model, existing)
+        lookup ? find_one(model: model, where: [lookup]) : find_one(model: model, where: where)
       end
 
       def update_many(model:, where:, update:, returning: false)
@@ -251,6 +252,16 @@ module BetterAuth
           fields.key?(field) || fields.any? { |logical_field, attributes| storage_key(attributes[:field_name] || logical_field) == field }
         end
         raise APIError.new("BAD_REQUEST", message: "No fields to update") unless has_updatable_field
+      end
+
+      def record_lookup(model, record)
+        fields = schema_for(model).fetch(:fields)
+        return {field: "id", value: record.fetch("id")} if fields.key?("id") && record.key?("id")
+
+        unique_field = fields.find { |field, attributes| attributes[:unique] && record.key?(field) }
+        return {field: unique_field.first, value: record.fetch(unique_field.first)} if unique_field
+
+        nil
       end
 
       def physical_attributes(model, logical)

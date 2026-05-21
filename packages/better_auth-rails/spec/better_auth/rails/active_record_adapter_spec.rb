@@ -307,6 +307,35 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     expect(record).to include("key" => "127.0.0.1:/sign-in", "count" => 1, "lastRequest" => 1_715_000_000_000)
   end
 
+  it "updates schema models without an id field by using a unique lookup" do
+    rate_limit_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      rate_limit: {storage: "database"}
+    )
+    rate_limit_adapter = described_class.new(rate_limit_config, connection: connection)
+    relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new(
+          "key" => "127.0.0.1:/sign-in",
+          "count" => 1,
+          "last_request" => 1_715_000_000_000
+        )
+      ]
+    )
+    rate_limit_adapter.send(:model_class, "rateLimit").relation = relation
+
+    updated = rate_limit_adapter.update(
+      model: "rateLimit",
+      where: [{field: "key", value: "127.0.0.1:/sign-in"}],
+      update: {count: 2}
+    )
+
+    expect(updated).to include("key" => "127.0.0.1:/sign-in")
+    expect(relation.where_calls).to include([{"key" => "127.0.0.1:/sign-in"}])
+    expect(relation.update_all_calls).to include("count" => 2)
+  end
+
   it "wraps work in an ActiveRecord transaction" do
     expect(fake_connection).to receive(:transaction).and_yield
 

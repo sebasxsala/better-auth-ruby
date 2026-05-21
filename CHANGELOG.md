@@ -10,7 +10,7 @@ release notes live in each package's `CHANGELOG.md`.
 - `better_auth` `0.7.0`: completed OpenAPI support with upstream base-route schema parity, richer plugin endpoint schemas, Scalar reference parity, hardened OAuth token/client-secret behavior, MCP OAuth-provider alignment, join-query handling, router hardening, and host-app responsibility docs.
 - `better_auth-api-key` `0.7.0`: hardened API key sessions by exposing token fingerprints instead of raw keys, improved listing and cleanup behavior, and expanded metadata and cleanup coverage.
 - `better_auth-hanami` `0.7.0`: aligned Sequel adapter query behavior, route mounting, action helpers, and install/migration generators with the shared adapter semantics.
-- `better_auth-mongodb` `0.7.0`: added Mongo index setup helpers, default `find_many` limits, upstream-shaped connector handling, scalar `in`/`not_in` support, and stronger transaction/index documentation.
+- `better_auth-mongodb` `0.7.0`: added Mongo index setup helpers, default `find_many` limits, upstream-shaped connector handling, scalar `not_in` support, and stronger transaction/index documentation.
 - `better_auth-oauth-provider` `0.7.0`: hardened consent, metadata, revocation, token, logout, endpoint rate-limit, and constant-time secret flows.
 - `better_auth-passkey` `0.7.0`: hardened WebAuthn challenge invalidation, duplicate credential checks, registration verification errors, and session freshness requirements.
 - `better_auth-rails` `0.7.0`: aligned Active Record adapter behavior, trusted-origin/controller-helper handling, configuration secrets, and MySQL/PostgreSQL integration coverage.

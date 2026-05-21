@@ -72,7 +72,12 @@ task :ci do
   sh "bundle exec standardrb #{STANDARD_PATHS.join(" ")}"
 
   puts "\n🧪 Running workspace packaging tests..."
-  sh "bundle exec ruby -Itest -e 'require \"./test/openauth_alias_packages_test\"; require \"./test/release_version_manifest_test\"'"
+  workspace_test_requires = [
+    "./test/openauth_alias_packages_test",
+    "./test/release_version_manifest_test",
+    "./test/mysql_plugin_schema_smoke_test"
+  ].map { |path| %(require "#{path}") }.join("; ")
+  sh %(bundle exec ruby -Itest -e '#{workspace_test_requires}')
 
   # Per-package tests
   puts "\n🧪 Running tests in packages/better_auth..."

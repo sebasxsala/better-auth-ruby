@@ -165,9 +165,14 @@ module BetterAuth
           existing = tables[key] || {model_name: table_data[:model_name] || physical_table_name(key), fields: {}}
           existing[:model_name] = table_data[:model_name] || existing[:model_name] || physical_table_name(key)
           existing[:fields] = existing[:fields].merge(normalize_fields(table_data[:fields] || {}))
+          existing[:fields] = id_field.merge(existing[:fields]) unless core_table?(key) || existing[:fields].key?("id")
           tables[key] = existing
         end
       end
+    end
+
+    private_class_method def self.core_table?(key)
+      %w[user session account verification].include?(key.to_s)
     end
 
     private_class_method def self.normalize_fields(fields)

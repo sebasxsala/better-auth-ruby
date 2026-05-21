@@ -163,7 +163,7 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_members_on_user_id" ON "members" ("user_id")'
     assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_members_on_organization_id" ON "members" ("organization_id")'
     assert_includes sql, 'UNIQUE ("slug")'
-    assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_organizations_on_slug" ON "organizations" ("slug")'
+    refute_includes sql, 'CREATE INDEX IF NOT EXISTS "index_organizations_on_slug" ON "organizations" ("slug")'
     assert_includes sql, 'CREATE INDEX IF NOT EXISTS "index_two_factors_on_secret" ON "two_factors" ("secret")'
   end
 
@@ -192,5 +192,56 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes postgres, "create index"
     refute_includes sqlite, "add index"
     refute_includes postgres, "add index"
+  end
+
+  def test_plugin_tables_without_declared_id_get_core_id_column
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "plugin-id",
+          schema: {
+            auditLog: {
+              model_name: "audit_logs",
+              fields: {
+                action: {type: "string", required: true}
+              }
+            }
+          }
+        }
+      ]
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).join("\n")
+
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "audit_logs"'
+    assert_includes sql, '"id" text PRIMARY KEY NOT NULL'
+    assert_includes sql, '"action" text NOT NULL'
+  end
+
+  def test_unique_indexed_fields_emit_only_unique_index
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [
+        {
+          id: "unique-index",
+          schema: {
+            auditLog: {
+              model_name: "audit_logs",
+              fields: {
+                action: {type: "string", required: true, unique: true, index: true}
+              }
+            }
+          }
+        }
+      ]
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :sqlite).join("\n")
+
+    assert_includes sql, 'UNIQUE ("action")'
+    refute_includes sql, 'CREATE INDEX IF NOT EXISTS "index_audit_logs_on_action"'
   end
 end

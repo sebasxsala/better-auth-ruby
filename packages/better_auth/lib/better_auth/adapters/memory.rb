@@ -120,7 +120,7 @@ module BetterAuth
           output[field] = coerce_value(value, field, attributes) if value_provided
         end
 
-        output["id"] = generated_id(model) if action == "create" && (!output.key?("id") || output["id"].nil?)
+        output["id"] = generated_id(model) if action == "create" && fields.key?("id") && (!output.key?("id") || output["id"].nil?)
         output
       end
 
