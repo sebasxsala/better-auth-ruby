@@ -63,6 +63,7 @@ module BetterAuth
         schema: {
           jwks: {
             fields: {
+              id: {type: "string", required: true},
               publicKey: {type: "string", required: true},
               privateKey: {type: "string", required: true},
               createdAt: {type: "date", required: true},

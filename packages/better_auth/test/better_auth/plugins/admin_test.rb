@@ -450,6 +450,16 @@ class BetterAuthPluginsAdminTest < Minitest::Test
     assert visible_sessions.all? { |session| !session.key?("impersonatedBy") }
   end
 
+  def test_admin_list_sessions_hook_preserves_missing_session_error
+    auth = build_auth
+
+    error = assert_raises(BetterAuth::APIError) do
+      auth.api.list_sessions
+    end
+
+    assert_equal 401, error.status_code
+  end
+
   def test_admin_impersonation_allows_admins_with_impersonate_admins_permission
     ac = BetterAuth::Plugins.create_access_control(user: ["impersonate", "impersonate-admins"], session: [])
     auth = build_auth(

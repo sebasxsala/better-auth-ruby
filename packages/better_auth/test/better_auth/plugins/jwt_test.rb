@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "jwt"
+require "tempfile"
 require_relative "../../test_helper"
 
 class BetterAuthPluginsJWTTest < Minitest::Test
@@ -22,6 +23,30 @@ class BetterAuthPluginsJWTTest < Minitest::Test
     assert_equal decoded.fetch("id"), decoded.fetch("sub")
     assert_equal jwks[:keys].first[:kid], header.fetch("kid")
     assert_equal "EdDSA", jwks[:keys].first[:alg]
+  end
+
+  def test_jwt_plugin_persists_generated_jwks_with_sql_adapters
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-jwt", ".sqlite3"]) do |file|
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      auth = build_auth(
+        database: ->(options) { BetterAuth::Adapters::SQLite.new(options, connection: connection) },
+        plugins: [BetterAuth::Plugins.jwt]
+      )
+      BetterAuth::Schema::SQL.create_statements(auth.options, dialect: :sqlite).each { |statement| connection.execute(statement) }
+      cookie = sign_up_cookie(auth, email: "jwt-sql@example.com")
+
+      _status, headers, _body = auth.api.get_session(headers: {"cookie" => cookie}, as_response: true)
+      stored = auth.context.adapter.find_many(model: "jwks")
+
+      assert headers.fetch("set-auth-jwt")
+      assert_equal 1, stored.length
+      assert stored.first.fetch("id")
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
   end
 
   def test_jwt_plugin_token_sign_and_verify_endpoints

@@ -2,6 +2,7 @@
 
 require "securerandom"
 require "json"
+require "monitor"
 require "time"
 
 module BetterAuth
@@ -15,6 +16,7 @@ module BetterAuth
         super(options)
         @connection = connection
         @dialect = dialect.to_sym
+        @connection_lock = Monitor.new
       end
 
       def create(model:, data:, force_allow_id: false)
@@ -122,13 +124,15 @@ module BetterAuth
       end
 
       def transaction
-        execute("BEGIN", [])
-        result = yield self
-        execute("COMMIT", [])
-        result
-      rescue
-        execute("ROLLBACK", [])
-        raise
+        @connection_lock.synchronize do
+          execute("BEGIN", [])
+          result = yield self
+          execute("COMMIT", [])
+          result
+        rescue
+          execute("ROLLBACK", [])
+          raise
+        end
       end
 
       private
@@ -287,23 +291,38 @@ module BetterAuth
       end
 
       def execute(sql, params)
-        if connection.respond_to?(:exec_params)
-          result = connection.exec_params(sql, params)
-          return result.to_a if result.respond_to?(:to_a)
+        @connection_lock.synchronize do
+          if connection.respond_to?(:exec_params)
+            result = connection.exec_params(sql, params)
+            return result.to_a if result.respond_to?(:to_a)
 
-          result
-        elsif connection.respond_to?(:query) && params.empty?
-          result = connection.query(sql)
-          result.respond_to?(:to_a) ? result.to_a : result
-        elsif connection.respond_to?(:prepare)
-          statement = connection.prepare(sql)
-          result = statement.execute(*params)
-          result.respond_to?(:to_a) ? result.to_a : result
-        elsif connection.respond_to?(:execute)
-          result = connection.execute(sql, params)
-          result.respond_to?(:to_a) ? result.to_a : result
-        else
-          raise Error, "SQL connection must respond to exec_params or prepare"
+            result
+          elsif connection.respond_to?(:query) && params.empty?
+            result = connection.query(sql)
+            result.respond_to?(:to_a) ? result.to_a : result
+          elsif dialect == :sqlite && connection.respond_to?(:execute)
+            result = connection.execute(sql, params)
+            result.respond_to?(:to_a) ? result.to_a : result
+          elsif connection.respond_to?(:prepare)
+            statement = connection.prepare(sql)
+            result = nil
+            begin
+              result = statement.execute(*params)
+              rows = result.respond_to?(:to_a) ? result.to_a : result
+              rows
+            ensure
+              if result.respond_to?(:close)
+                result.close
+              elsif statement.respond_to?(:close)
+                statement.close
+              end
+            end
+          elsif connection.respond_to?(:execute)
+            result = connection.execute(sql, params)
+            result.respond_to?(:to_a) ? result.to_a : result
+          else
+            raise Error, "SQL connection must respond to exec_params or prepare"
+          end
         end
       end
 
@@ -423,6 +442,7 @@ module BetterAuth
         return value.iso8601(6) if dialect == :sqlite && attributes[:type] == "date" && value.respond_to?(:iso8601)
         return Time.parse(value) if attributes[:type] == "date" && value.is_a?(String)
         return JSON.generate(value) if json_like?(attributes) && !value.is_a?(String)
+        return value.encode(Encoding::UTF_8) if attributes[:type] == "string" && value.is_a?(String) && value.encoding == Encoding::ASCII_8BIT
 
         value
       end

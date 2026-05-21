@@ -66,7 +66,11 @@ module BetterAuth
           after: [
             {
               matcher: ->(ctx) { ctx.path == "/list-sessions" },
-              handler: ->(ctx) { ctx.json(Array(ctx.returned).reject { |session| session["impersonatedBy"] || session[:impersonatedBy] }) }
+              handler: lambda do |ctx|
+                next unless ctx.returned.is_a?(Array)
+
+                ctx.json(ctx.returned.reject { |session| session["impersonatedBy"] || session[:impersonatedBy] })
+              end
             }
           ]
         },

@@ -107,6 +107,19 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, "CREATE INDEX [index_sessions_on_user_id] ON [sessions] ([user_id])"
   end
 
+  def test_mssql_nullable_unique_fields_use_filtered_indexes
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.phone_number]
+    )
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :mssql).join("\n")
+
+    refute_includes sql, "CONSTRAINT [uniq_users_phone_number] UNIQUE ([phone_number])"
+    assert_includes sql, "CREATE UNIQUE INDEX [uniq_users_phone_number] ON [users] ([phone_number]) WHERE [phone_number] IS NOT NULL"
+  end
+
   def test_plugin_sql_schema_includes_organization_tables
     config = BetterAuth::Configuration.new(
       secret: SECRET,

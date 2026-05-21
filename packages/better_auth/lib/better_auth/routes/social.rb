@@ -2,6 +2,7 @@
 
 require "uri"
 require "json"
+require "net/http"
 require "securerandom"
 
 module BetterAuth
@@ -163,7 +164,11 @@ module BetterAuth
 
         token_data = token_hash(tokens)
         token_data["user"] = parse_json_hash(data["user"]) if data["user"]
-        user_info = call_provider(provider, :get_user_info, token_data)
+        user_info = begin
+          call_provider(provider, :get_user_info, token_data)
+        rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError
+          nil
+        end
         user = user_info[:user] || user_info["user"] if user_info
         raise ctx.redirect(oauth_error_url(error_url, "unable_to_get_user_info")) unless user
         raise ctx.redirect(oauth_error_url(error_url, "email_not_found")) if fetch_value(user, "email").to_s.empty?

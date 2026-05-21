@@ -23,6 +23,21 @@ class BetterAuthEndpointTest < Minitest::Test
     assert_includes result.headers["set-cookie"], "session=value"
   end
 
+  def test_endpoint_splits_multiple_set_cookie_values_for_rack
+    auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
+    endpoint = BetterAuth::Endpoint.new(path: "/cookies", method: "GET") do |ctx|
+      ctx.set_cookie("session", "value")
+      ctx.set_cookie("method", "email")
+
+      {ok: true}
+    end
+
+    result = endpoint.call(context_for(auth, endpoint))
+    _status, headers, _body = result.to_rack_response
+
+    assert_equal ["session=value", "method=email"], headers["set-cookie"].map { |line| line.split(";").first }
+  end
+
   def test_endpoint_preserves_raw_rack_responses
     auth = BetterAuth.auth(base_url: "http://localhost:3000", secret: SECRET)
     endpoint = BetterAuth::Endpoint.new(path: "/raw", method: "GET") do

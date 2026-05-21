@@ -207,6 +207,26 @@ module BetterAuth
     class Result
       attr_accessor :response, :status, :headers
 
+      class SetCookieHeader < Array
+        def self.from(value)
+          new(value.lines.map(&:chomp))
+        end
+
+        def include?(value)
+          return super unless value.is_a?(String)
+
+          any? { |line| line.include?(value) }
+        end
+
+        def lines
+          self
+        end
+
+        def to_s
+          join("\n")
+        end
+      end
+
       def initialize(response:, status: 200, headers: {}, raw_response: nil)
         @response = response
         @status = status
@@ -258,7 +278,7 @@ module BetterAuth
       end
 
       def to_response
-        return Response.from_rack(@raw_response) if raw_response?
+        return Response.from_rack([@raw_response[0], rack_headers(@raw_response[1]), @raw_response[2]]) if raw_response?
 
         body = if response.nil?
           [JSON.generate(nil)]
@@ -267,11 +287,22 @@ module BetterAuth
         else
           [JSON.generate(response)]
         end
-        response_headers = {"content-type" => "application/json"}.merge(headers)
+        response_headers = rack_headers({"content-type" => "application/json"}.merge(headers))
         Response.new(status: status, headers: response_headers, body: body)
       end
 
       private
+
+      def rack_headers(value)
+        value.each_with_object({}) do |(key, header_value), result|
+          normalized = key.to_s.downcase
+          result[normalized] = if normalized == "set-cookie" && header_value.is_a?(String) && header_value.include?("\n")
+            SetCookieHeader.from(header_value)
+          else
+            header_value
+          end
+        end
+      end
 
       def normalize_headers(headers)
         headers.each_with_object({}) do |(key, value), result|

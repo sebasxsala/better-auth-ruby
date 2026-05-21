@@ -42,7 +42,7 @@ module BetterAuth
         when :mysql
           %(CREATE TABLE IF NOT EXISTS #{quote(table_name, dialect)} (\n  #{body}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;)
         when :mssql
-          %(IF OBJECT_ID(N'#{quote(table_name, dialect)}', N'U') IS NULL\nCREATE TABLE #{quote(table_name, dialect)} (\n  #{body}\n);)
+          %(#{mssql_required_set_options}\nIF OBJECT_ID(N'#{quote(table_name, dialect)}', N'U') IS NULL\nCREATE TABLE #{quote(table_name, dialect)} (\n  #{body}\n);)
         else
           raise ArgumentError, "Unsupported SQL dialect: #{dialect}"
         end
@@ -66,7 +66,7 @@ module BetterAuth
         constraints = []
         column = attributes[:field_name] || physical_name(logical_field)
 
-        if attributes[:unique] && logical_field != "id"
+        if attributes[:unique] && logical_field != "id" && !(dialect == :mssql && !attributes[:required])
           constraints << unique_constraint(table_name, column, dialect)
         end
 
@@ -81,11 +81,13 @@ module BetterAuth
       def index_statements(table, dialect)
         table_name = table.fetch(:model_name)
         table.fetch(:fields).filter_map do |logical_field, attributes|
-          next unless attributes[:index]
+          nullable_unique_mssql = dialect == :mssql && attributes[:unique] && logical_field != "id" && !attributes[:required]
+          next unless attributes[:index] || nullable_unique_mssql
 
           column = attributes[:field_name] || Schema.physical_name(logical_field)
-          name = "index_#{table_name}_on_#{column}"
-          index_statement(table_name, column, name, dialect)
+          unique = attributes[:unique] && dialect == :mssql
+          name = unique ? "uniq_#{table_name}_#{column}" : "index_#{table_name}_on_#{column}"
+          index_statement(table_name, column, name, dialect, unique: unique, where_not_null: unique)
         end
       end
 
@@ -94,7 +96,7 @@ module BetterAuth
         %(ALTER TABLE #{quote(table_name, dialect)} #{keyword} #{column_definition(table_name, logical_field, attributes, dialect)};)
       end
 
-      def index_statement(table_name, column, name, dialect, unique: false)
+      def index_statement(table_name, column, name, dialect, unique: false, where_not_null: false)
         unique_prefix = unique ? "UNIQUE " : ""
         case dialect
         when :postgres, :sqlite
@@ -102,8 +104,21 @@ module BetterAuth
         when :mysql
           %(CREATE #{unique_prefix}INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
         when :mssql
-          %(IF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '#{name.gsub("'", "''")}' AND object_id = OBJECT_ID(N'#{quote(table_name, dialect)}')) CREATE #{unique_prefix}INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)});)
+          filter = where_not_null ? " WHERE #{quote(column, dialect)} IS NOT NULL" : ""
+          %(#{mssql_required_set_options}\nIF NOT EXISTS (SELECT name FROM sys.indexes WHERE name = '#{name.gsub("'", "''")}' AND object_id = OBJECT_ID(N'#{quote(table_name, dialect)}')) CREATE #{unique_prefix}INDEX #{quote(name, dialect)} ON #{quote(table_name, dialect)} (#{quote(column, dialect)})#{filter};)
         end
+      end
+
+      def mssql_required_set_options
+        <<~SQL.strip
+          SET ANSI_NULLS ON;
+          SET QUOTED_IDENTIFIER ON;
+          SET ANSI_WARNINGS ON;
+          SET ANSI_PADDING ON;
+          SET CONCAT_NULL_YIELDS_NULL ON;
+          SET ARITHABORT ON;
+          SET NUMERIC_ROUNDABORT OFF;
+        SQL
       end
 
       def sql_type(logical_field, attributes, dialect)

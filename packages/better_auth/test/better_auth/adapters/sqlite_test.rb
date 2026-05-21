@@ -139,6 +139,36 @@ class BetterAuthSQLiteAdapterTest < Minitest::Test
     skip "sqlite3 gem is not installed"
   end
 
+  def test_sqlite_adapter_matches_binary_encoded_string_where_values
+    require "sqlite3"
+
+    Tempfile.create(["better-auth-binary-token", ".sqlite3"]) do |file|
+      config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+      connection = SQLite3::Database.new(file.path)
+      connection.results_as_hash = true
+      create_schema(connection, config)
+      adapter = BetterAuth::Adapters::SQLite.new(config, connection: connection)
+
+      user = adapter.create(model: "user", data: {name: "Binary Token", email: "binary-token@example.com"})
+      token = "binary-token-value"
+      adapter.create(
+        model: "session",
+        data: {token: token, userId: user.fetch("id"), expiresAt: Time.now + 3600},
+        force_allow_id: true
+      )
+
+      binary_token = token.b
+      assert_equal Encoding::ASCII_8BIT, binary_token.encoding
+
+      session = adapter.find_one(model: "session", where: [{field: "token", value: binary_token}])
+      assert_equal token, session.fetch("token")
+    ensure
+      connection&.close
+    end
+  rescue LoadError
+    skip "sqlite3 gem is not installed"
+  end
+
   private
 
   def create_schema(connection, config)

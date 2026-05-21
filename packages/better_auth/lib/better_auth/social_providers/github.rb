@@ -43,6 +43,8 @@ module BetterAuth
             "User-Agent" => "better-auth"
           }
           profile = Base.get_json(user_info_endpoint, headers)
+          next nil unless profile
+
           emails = Base.get_json(emails_endpoint, headers)
           primary = Array(emails).find { |email| email["email"] == profile["email"] } ||
             Array(emails).find { |email| email["primary"] } ||

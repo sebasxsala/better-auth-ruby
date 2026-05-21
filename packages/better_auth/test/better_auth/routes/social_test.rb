@@ -165,6 +165,31 @@ class BetterAuthRoutesSocialTest < Minitest::Test
     assert_equal issued_code_verifier, callback_code_verifier
   end
 
+  def test_callback_social_redirects_to_error_when_provider_user_info_times_out
+    auth = build_auth(
+      social_providers: {
+        github: {
+          id: "github",
+          create_authorization_url: ->(data) { "https://github.example/oauth?state=#{URI.encode_www_form_component(data[:state])}" },
+          validate_authorization_code: ->(_data) { {accessToken: "oauth-access"} },
+          get_user_info: ->(_tokens) { raise Net::OpenTimeout }
+        }
+      }
+    )
+    response = auth.api.sign_in_social(body: {provider: "github", callbackURL: "/app", errorCallbackURL: "/auth-error", disableRedirect: true})
+    state = URI.decode_www_form(URI.parse(response[:url]).query).assoc("state").last
+
+    status, headers, _body = auth.api.callback_oauth(
+      params: {providerId: "github"},
+      query: {code: "code", state: state},
+      as_response: true
+    )
+
+    assert_equal 302, status
+    assert_equal "/auth-error?error=unable_to_get_user_info", headers.fetch("location")
+    assert_nil auth.context.internal_adapter.find_user_by_email("callback@example.com")
+  end
+
   def test_callback_post_redirects_to_get_with_merged_body_and_query
     called = false
     auth = build_auth(

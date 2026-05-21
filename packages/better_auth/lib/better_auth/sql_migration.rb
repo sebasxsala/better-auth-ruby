@@ -403,23 +403,49 @@ module BetterAuth
     def information_schema(connection, dialect, columns_sql, indexes_sql)
       schema = {}
       execute_sql(connection, columns_sql).each do |row|
-        table_name = row["table_name"] || row[:table_name] || row["tableName"] || row[:tableName]
-        column_name = row["column_name"] || row[:column_name] || row["columnName"] || row[:columnName]
-        data_type = row["data_type"] || row[:data_type] || row["dataType"] || row[:dataType]
+        table_name = row_value(row, "table_name")
+        column_name = row_value(row, "column_name")
+        data_type = row_value(row, "data_type")
         schema[table_name] ||= {name: table_name, columns: {}, indexes: empty_index_metadata}
         schema[table_name][:columns][column_name] = data_type
       end
       execute_sql(connection, indexes_sql).each do |row|
-        table_name = row["table_name"] || row[:table_name] || row["tableName"] || row[:tableName]
-        column_name = row["column_name"] || row[:column_name] || row["columnName"] || row[:columnName]
-        index_name = row["index_name"] || row[:index_name] || row["indexName"] || row[:indexName]
-        unique = row["unique"] || row[:unique] || row["is_unique"] || row[:is_unique] || row["non_unique"] == 0 || row[:non_unique] == 0
+        table_name = row_value(row, "table_name")
+        column_name = row_value(row, "column_name")
+        index_name = row_value(row, "index_name")
+        unique_value = row_value(row, "unique") || row_value(row, "is_unique")
+        non_unique_value = row_value(row, "non_unique")
+        unique = (!unique_value.nil?) ? truthy_database_value?(unique_value) : non_unique_value.to_i == 0
         schema[table_name] ||= {name: table_name, columns: {}, indexes: empty_index_metadata}
         schema[table_name][:indexes][:names] << index_name if index_name
         schema[table_name][:indexes][:columns] << column_name if column_name
         schema[table_name][:indexes][:unique_columns] << column_name if column_name && !!unique
       end
       schema
+    end
+
+    def row_value(row, key)
+      candidates = [
+        key,
+        key.to_sym,
+        key.upcase,
+        key.upcase.to_sym,
+        camelize_lower(key),
+        camelize_lower(key).to_sym
+      ]
+      candidates.each { |candidate| return row[candidate] if row.key?(candidate) }
+      nil
+    end
+
+    def truthy_database_value?(value)
+      return value if value == true || value == false
+
+      value.to_i != 0
+    end
+
+    def camelize_lower(value)
+      parts = value.to_s.split("_")
+      ([parts.first] + parts.drop(1).map(&:capitalize)).join
     end
 
     def empty_index_metadata

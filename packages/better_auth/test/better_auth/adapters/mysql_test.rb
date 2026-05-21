@@ -7,11 +7,14 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
   SECRET = "test-secret-that-is-long-enough-for-validation"
 
   def test_mysql_adapter_can_be_instantiated_without_rails
-    adapter = BetterAuth::Adapters::MySQL.new(url: "mysql2://user:password@127.0.0.1:3306/better_auth")
+    port = ENV.fetch("BETTER_AUTH_MYSQL_PORT", "3306")
+    adapter = BetterAuth::Adapters::MySQL.new(url: "mysql2://user:password@127.0.0.1:#{port}/better_auth")
 
     assert_equal :mysql, adapter.dialect
   rescue LoadError
     skip "mysql2 gem is not installed"
+  rescue Mysql2::Error::ConnectionError
+    skip "MySQL test service is not available"
   end
 
   def test_mysql_adapter_runs_core_crud_against_docker_service
@@ -79,6 +82,26 @@ class BetterAuthMySQLAdapterTest < Minitest::Test
     assert_equal token, session[:session]["token"]
     assert_equal user_id, session[:session]["userId"]
     assert_equal "MySQL Direct Update", session[:user]["name"]
+  rescue LoadError
+    skip "mysql2 gem is not installed"
+  rescue Mysql2::Error::ConnectionError
+    skip "MySQL test service is not available"
+  ensure
+    connection&.close
+  end
+
+  def test_mysql_pending_migration_does_not_recreate_existing_indexes
+    require "mysql2"
+
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = mysql_connection
+    reset_schema(connection)
+    create_schema(connection, config)
+
+    sql = BetterAuth::SQLMigration.render_pending(config, connection: connection, dialect: :mysql, generator: "better_auth-test")
+
+    refute_includes sql, "index_sessions_on_user_id"
+    refute_includes sql, "index_accounts_on_user_id"
   rescue LoadError
     skip "mysql2 gem is not installed"
   rescue Mysql2::Error::ConnectionError
