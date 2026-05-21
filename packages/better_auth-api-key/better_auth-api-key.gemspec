@@ -31,7 +31,15 @@ Gem::Specification.new do |spec|
   spec.add_dependency "better_auth", "~> 0.1"
 
   spec.add_development_dependency "bundler", "~> 2.5"
+  spec.add_development_dependency "better_auth-mongodb", "~> 0.9"
+  spec.add_development_dependency "better_auth-redis-storage", "~> 0.9"
   spec.add_development_dependency "minitest", "~> 5.25"
+  spec.add_development_dependency "mysql2", "~> 0.5"
+  spec.add_development_dependency "pg", "~> 1.5"
   spec.add_development_dependency "rake", "~> 13.2"
+  spec.add_development_dependency "redis", "~> 5.0"
+  spec.add_development_dependency "sequel", "~> 5.83"
+  spec.add_development_dependency "sqlite3", "~> 2.0"
   spec.add_development_dependency "standardrb", "~> 1.0"
+  spec.add_development_dependency "tiny_tds", "~> 2.1"
 end

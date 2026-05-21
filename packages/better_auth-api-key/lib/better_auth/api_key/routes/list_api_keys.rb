@@ -108,6 +108,10 @@ module BetterAuth
           ctx.context.adapter.count(model: BetterAuth::Plugins::API_KEY_TABLE_NAME, where: where).positive?
         rescue KeyError, NoMethodError
           false
+        rescue BetterAuth::Error => error
+          raise unless error.message.include?("Field userId not found")
+
+          false
         end
       end
     end

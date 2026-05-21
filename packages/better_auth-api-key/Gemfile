@@ -5,11 +5,19 @@ source "https://rubygems.org"
 ruby file: "../better_auth/.ruby-version"
 
 gem "better_auth", path: "../better_auth"
+gem "better_auth-mongodb", path: "../better_auth-mongodb"
+gem "better_auth-redis-storage", path: "../better_auth-redis-storage"
 
 gemspec name: "better_auth-api-key"
 
 group :development, :test do
   gem "minitest", "~> 5.25"
+  gem "mysql2", "~> 0.5"
+  gem "pg", "~> 1.5"
   gem "rake", "~> 13.2"
+  gem "redis", "~> 5.0"
+  gem "sequel", "~> 5.83"
+  gem "sqlite3", "~> 2.0"
   gem "standardrb", "~> 1.0"
+  gem "tiny_tds", "~> 2.1"
 end
