@@ -24,5 +24,11 @@ Rails.application.routes.draw do
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
 
+  get "/sessions", to: dashboard
+  get "/social", to: dashboard
+  get "/plugins", to: dashboard
+  get "/database", to: dashboard
+  get "/settings", to: dashboard
+
   mount dashboard, at: "/"
 end

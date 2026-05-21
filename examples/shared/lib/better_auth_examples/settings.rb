@@ -12,7 +12,8 @@ module BetterAuthExamples
       database: "memory",
       rate_adapter: "memory",
       rate_window: 10,
-      rate_max: 100
+      rate_max: 100,
+      disabled_plugins: []
     }.freeze
     COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 
@@ -39,7 +40,8 @@ module BetterAuthExamples
         database: database,
         rate_adapter: rate_adapter,
         rate_window: positive_integer(input[:rate_window], DEFAULTS[:rate_window]),
-        rate_max: positive_integer(input[:rate_max], DEFAULTS[:rate_max])
+        rate_max: positive_integer(input[:rate_max], DEFAULTS[:rate_max]),
+        disabled_plugins: plugin_ids(input[:disabled_plugins])
       }
     end
 
@@ -51,13 +53,17 @@ module BetterAuthExamples
       "#{COOKIE_NAME}=#{cookie_value(settings)}; Path=/; Max-Age=#{COOKIE_MAX_AGE}; SameSite=Lax"
     end
 
-    def clear_auth_cookie_headers
-      %w[
+    def clear_auth_cookie_headers(request = nil)
+      names = %w[
         better-auth.session_token
         better-auth.session_data
         better-auth.account_data
         better-auth.dont_remember
-      ].map { |name| "#{name}=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly" }
+      ]
+      if request
+        names.concat(request.cookies.keys.select { |name| name.start_with?("better-auth.session_token_multi-") })
+      end
+      names.uniq.map { |name| "#{name}=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly" }
     end
 
     def symbolize_keys(value)
@@ -76,6 +82,15 @@ module BetterAuthExamples
       parsed.positive? ? parsed : fallback
     rescue ArgumentError, TypeError
       fallback
+    end
+
+    def plugin_ids(value)
+      Array(value)
+        .flat_map { |entry| entry.to_s.split(",") }
+        .map { |entry| entry.strip.downcase }
+        .reject(&:empty?)
+        .uniq
+        .sort
     end
   end
 end

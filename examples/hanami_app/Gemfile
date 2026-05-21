@@ -24,6 +24,7 @@ gem "tiny_tds", "~> 2.1"
 
 group :development do
   gem "hanami-webconsole", "~> 2.3.0"
+  gem "rerun", require: false
 end
 
 group :development, :test do

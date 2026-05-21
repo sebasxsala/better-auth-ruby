@@ -49,19 +49,22 @@ module BetterAuthExamples
       true
     end
 
-    def explore(auth, limit: 100)
+    def explore(auth, table: nil, limit: 50, offset: 0)
+      limit = normalized_page_limit(limit)
+      offset = normalized_page_offset(offset)
+      selected_table = table.to_s.empty? ? nil : table.to_s
       adapter = auth.context.adapter
       tables = if adapter.is_a?(BetterAuth::Adapters::Memory)
-        explore_memory(adapter, limit)
+        explore_memory(auth, selected_table, limit, offset)
       elsif sql_adapter?(adapter)
-        explore_sql(auth, limit)
+        explore_sql(auth, selected_table, limit, offset)
       elsif mongodb_adapter?(adapter)
-        explore_mongodb(auth, limit)
+        explore_mongodb(auth, selected_table, limit, offset)
       else
         []
       end
 
-      {provider: provider_name(adapter), tables: tables}
+      {provider: provider_name(adapter), tables: tables, limit: limit, offset: offset}
     end
 
     def delete_records!(auth, table_name, ids)
@@ -70,7 +73,7 @@ module BetterAuthExamples
       return {deleted: 0} if ids.empty?
 
       if adapter.is_a?(BetterAuth::Adapters::Memory)
-        delete_memory_records!(adapter, table_name, ids)
+        delete_memory_records!(auth, table_name, ids)
       elsif sql_adapter?(adapter)
         delete_sql_records!(auth, table_name, ids)
       elsif mongodb_adapter?(adapter)
@@ -113,26 +116,58 @@ module BetterAuthExamples
       end
     end
 
-    def explore_memory(adapter, limit)
-      memory_table_names(adapter).map do |name|
-        rows = memory_rows(adapter, name)
-        normalized_rows = rows.first(limit).map { |row| normalize_row(row) }
+    def normalized_page_limit(limit)
+      value = Integer(limit || 50)
+      value.clamp(1, 200)
+    rescue
+      50
+    end
+
+    def normalized_page_offset(offset)
+      [Integer(offset || 0), 0].max
+    rescue
+      0
+    end
+
+    def include_rows_for_table?(table_name, selected_table)
+      selected_table.nil? || table_name.to_s == selected_table.to_s
+    end
+
+    def paginated_select_sql(quoted_table, dialect, limit, offset)
+      if dialect == :mssql
+        "SELECT * FROM #{quoted_table} ORDER BY (SELECT NULL) OFFSET #{offset.to_i} ROWS FETCH NEXT #{limit.to_i} ROWS ONLY;"
+      else
+        "SELECT * FROM #{quoted_table} LIMIT #{limit.to_i} OFFSET #{offset.to_i};"
+      end
+    end
+
+    def explore_memory(auth, selected_table, limit, offset)
+      memory_table_names(auth).map do |name|
+        rows = memory_rows(auth, name)
+        normalized_rows = if include_rows_for_table?(name, selected_table)
+          rows.drop(offset).first(limit).map { |row| normalize_row(row) }
+        else
+          []
+        end
         {
           name: name,
-          columns: columns_for(normalized_rows, memory_schema_columns(name)),
+          columns: columns_for(normalized_rows, memory_schema_columns(auth.options, name)),
           count: rows.length,
           rows: normalized_rows
         }
       end
     end
 
-    def explore_sql(auth, limit)
+    def explore_sql(auth, selected_table, limit, offset)
       adapter = auth.context.adapter
       dialect = adapter.dialect
       sql_table_names(auth).map do |table_name|
         quoted = BetterAuth::Schema::SQL.quote(table_name, dialect)
-        rows_sql = (dialect == :mssql) ? "SELECT TOP (#{limit.to_i}) * FROM #{quoted};" : "SELECT * FROM #{quoted} LIMIT #{limit.to_i};"
-        rows = execute_adapter_sql(adapter, rows_sql).map { |row| normalize_row(row) }
+        rows = if include_rows_for_table?(table_name, selected_table)
+          execute_adapter_sql(adapter, paginated_select_sql(quoted, dialect, limit, offset)).map { |row| normalize_row(row) }
+        else
+          []
+        end
         count_row = execute_adapter_sql(adapter, "SELECT COUNT(*) AS count FROM #{quoted};").first || {}
         {
           name: table_name,
@@ -151,14 +186,18 @@ module BetterAuthExamples
       end
     end
 
-    def explore_mongodb(auth, limit)
+    def explore_mongodb(auth, selected_table, limit, offset)
       adapter = auth.context.adapter
       mongodb_collection_names(auth).map do |collection_name|
         collection = adapter.database.collection(collection_name)
-        rows = collection.find.limit(limit.to_i).map { |row| normalize_row(row) }
+        rows = if include_rows_for_table?(collection_name, selected_table)
+          collection.find.skip(offset).limit(limit).map { |row| normalize_row(row) }
+        else
+          []
+        end
         {
           name: collection_name,
-          columns: columns_for(rows, memory_schema_columns(collection_name)),
+          columns: columns_for(rows, memory_schema_columns(auth.options, collection_name)),
           count: collection.count_documents({}),
           rows: rows
         }
@@ -176,12 +215,15 @@ module BetterAuthExamples
     def ensure_sql_schema!(auth)
       adapter = auth.context.adapter
       dialect = adapter.dialect
-      statements = BetterAuth::Schema::SQL.create_statements(auth.options, dialect: dialect)
-      statements.each do |statement|
-        next if index_statement?(statement) && index_exists?(adapter, statement)
+      sql = BetterAuth::SQLMigration.render_pending(
+        auth.options,
+        connection: adapter.connection,
+        dialect: dialect,
+        generator: "better-auth-examples"
+      )
+      return if sql.empty?
 
-        execute_adapter_sql(adapter, statement)
-      end
+      execute_adapter_sql(adapter, sql)
     end
 
     def execute_adapter_sql(adapter, sql)
@@ -231,35 +273,38 @@ module BetterAuthExamples
       false
     end
 
-    def memory_table_names(adapter)
-      schema_names = schema_table_names
-      logical_names = memory_logical_table_names.values
-      extra_names = adapter.db.keys.map(&:to_s).reject { |name| schema_names.include?(name) || logical_names.include?(name) }
+    def memory_table_names(auth)
+      adapter = auth.context.adapter
+      schema_names = schema_table_names(auth.options)
+      logical_names = memory_logical_table_names(auth.options).values
+      legacy_names = legacy_schema_names(auth.options)
+      extra_names = adapter.db.keys.map(&:to_s).reject { |name| schema_names.include?(name) || logical_names.include?(name) || legacy_names.include?(name) }
       (schema_names + extra_names).uniq
     end
 
-    def schema_table_names
-      BetterAuth::Schema.auth_tables({}).values.map { |table| table.fetch(:model_name).to_s }
+    def schema_table_names(options)
+      BetterAuth::Schema.auth_tables(options).values.map { |table| table.fetch(:model_name).to_s }
     rescue
       %w[users sessions accounts verifications]
     end
 
-    def memory_schema_columns(table_name)
-      table = BetterAuth::Schema.auth_tables({}).values.find { |candidate| candidate.fetch(:model_name).to_s == table_name.to_s }
+    def memory_schema_columns(options, table_name)
+      table = BetterAuth::Schema.auth_tables(options).values.find { |candidate| candidate.fetch(:model_name).to_s == table_name.to_s }
       return [] unless table
 
-      table.fetch(:fields).values.map { |field| field[:field_name] || field["field_name"] }.compact
+      table.fetch(:fields).map { |logical_name, field| field[:field_name] || field["field_name"] || BetterAuth::Schema.send(:physical_name, logical_name) }.compact
     rescue
       []
     end
 
-    def memory_rows(adapter, table_name)
-      logical_name = memory_logical_table_names.fetch(table_name.to_s, table_name.to_s)
+    def memory_rows(auth, table_name)
+      adapter = auth.context.adapter
+      logical_name = memory_logical_table_names(auth.options).fetch(table_name.to_s, table_name.to_s)
       adapter.db.fetch(logical_name, adapter.db.fetch(table_name.to_s, []))
     end
 
-    def memory_logical_table_names
-      BetterAuth::Schema.auth_tables({}).each_with_object({}) do |(logical_name, table), result|
+    def memory_logical_table_names(options)
+      BetterAuth::Schema.auth_tables(options).each_with_object({}) do |(logical_name, table), result|
         result[table.fetch(:model_name).to_s] = logical_name.to_s
       end
     rescue
@@ -275,7 +320,9 @@ module BetterAuthExamples
     def sql_table_names(auth)
       adapter = auth.context.adapter
       schema_names = BetterAuth::Schema.auth_tables(auth.options).values.map { |table| table.fetch(:model_name).to_s }
-      (schema_names + actual_sql_tables(adapter)).uniq.reject { |name| ignored_table?(name) }
+      legacy_names = legacy_schema_names(auth.options)
+      actual_names = actual_sql_tables(adapter).reject { |name| legacy_names.include?(name) }
+      (schema_names + actual_names).uniq.reject { |name| ignored_table?(name) }
     end
 
     def table_list_sql(dialect)
@@ -300,8 +347,9 @@ module BetterAuthExamples
       []
     end
 
-    def delete_memory_records!(adapter, table_name, ids)
-      logical_name = memory_logical_table_names.fetch(table_name.to_s, table_name.to_s)
+    def delete_memory_records!(auth, table_name, ids)
+      adapter = auth.context.adapter
+      logical_name = memory_logical_table_names(auth.options).fetch(table_name.to_s, table_name.to_s)
       rows = adapter.db.fetch(logical_name, [])
       before = rows.length
       rows.reject! { |row| ids.include?((row["id"] || row[:id]).to_s) }
@@ -356,9 +404,10 @@ module BetterAuthExamples
       logical_names = tables.keys.map(&:to_s)
       schema_names = tables.values.map { |table| table.fetch(:model_name).to_s }
       actual_names = adapter.database.collection_names.map(&:to_s)
+      legacy_names = legacy_schema_names(auth.options)
       (schema_names + actual_names)
         .uniq
-        .reject { |name| ignored_table?(name) || legacy_mongodb_collection?(name, logical_names, schema_names) }
+        .reject { |name| ignored_table?(name) || legacy_names.include?(name) || legacy_mongodb_collection?(name, logical_names, schema_names) }
         .sort
     end
 
@@ -373,14 +422,30 @@ module BetterAuthExamples
     def drop_sql_tables(auth)
       adapter = auth.context.adapter
       dialect = adapter.dialect
-      names = BetterAuth::Schema.auth_tables(auth.options).values.map { |table| table.fetch(:model_name) }.reverse
+      names = BetterAuth::Schema.auth_tables(auth.options).values.map { |table| table.fetch(:model_name).to_s }
+      names.concat(actual_sql_tables(adapter).select { |name| legacy_schema_names(auth.options).include?(name) })
+      names = names.uniq.reverse
       names << "better_auth_schema_migrations"
       statements = names.map { |name| drop_table_statement(name, dialect) }
+      statements.unshift(mssql_drop_foreign_keys_statement(names)) if dialect == :mssql
       statements.unshift("SET FOREIGN_KEY_CHECKS=0") if dialect == :mysql
       statements << "SET FOREIGN_KEY_CHECKS=1" if dialect == :mysql
       statements.unshift("PRAGMA foreign_keys = OFF") if dialect == :sqlite
       statements << "PRAGMA foreign_keys = ON" if dialect == :sqlite
       execute_adapter_sql(adapter, statements.join(";\n"))
+    end
+
+    def mssql_drop_foreign_keys_statement(table_names)
+      quoted_names = table_names.map { |name| BetterAuth::SQLMigration.literal(name) }.join(", ")
+      <<~SQL
+        DECLARE @sql NVARCHAR(MAX) = N''
+        SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(SCHEMA_NAME(parent_table.schema_id)) + N'.' + QUOTENAME(parent_table.name) + N' DROP CONSTRAINT ' + QUOTENAME(foreign_key.name) + CHAR(10)
+        FROM sys.foreign_keys AS foreign_key
+        INNER JOIN sys.tables AS parent_table ON foreign_key.parent_object_id = parent_table.object_id
+        INNER JOIN sys.tables AS referenced_table ON foreign_key.referenced_object_id = referenced_table.object_id
+        WHERE parent_table.name IN (#{quoted_names}) OR referenced_table.name IN (#{quoted_names})
+        EXEC sp_executesql @sql
+      SQL
     end
 
     def drop_table_statement(name, dialect)
@@ -404,7 +469,52 @@ module BetterAuthExamples
 
     def mongodb_auth_collection_names(auth)
       tables = BetterAuth::Schema.auth_tables(auth.options)
-      (tables.keys + tables.values.map { |table| table.fetch(:model_name) }).map(&:to_s).uniq
+      schema_names = tables.values.map { |table| table.fetch(:model_name).to_s }
+      adapter = auth.context.adapter
+      actual_legacy_names = if mongodb_adapter?(adapter)
+        adapter.database.collection_names.map(&:to_s).select { |name| legacy_schema_names(auth.options).include?(name) }
+      else
+        []
+      end
+      (schema_names + actual_legacy_names).map(&:to_s).uniq
+    end
+
+    def legacy_schema_names(options)
+      BetterAuth::Schema.auth_tables(options).flat_map do |logical_name, table|
+        current = table.fetch(:model_name).to_s
+        singular = singular_table_name(current)
+        [
+          logical_name.to_s,
+          underscore(logical_name),
+          camelize_lower(current),
+          singular,
+          camelize_lower(singular)
+        ].compact.reject { |name| name.empty? || name == current }
+      end.uniq
+    rescue
+      []
+    end
+
+    def singular_table_name(name)
+      value = name.to_s
+      return "api_key" if value == "api_keys"
+      return "#{value[0...-3]}y" if value.end_with?("ies")
+      return value[0...-2] if value.match?(/(ses|xes|zes|ches|shes)\z/)
+      return value[0...-1] if value.end_with?("s")
+
+      value
+    end
+
+    def camelize_lower(value)
+      parts = underscore(value).split("_")
+      ([parts.first] + parts.drop(1).map(&:capitalize)).join
+    end
+
+    def underscore(value)
+      value.to_s
+        .gsub(/([a-z\d])([A-Z])/, "\\1_\\2")
+        .tr("-", "_")
+        .downcase
     end
 
     def columns_for(rows, fallback = [])

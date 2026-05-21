@@ -7,6 +7,11 @@ require "rack/response"
 
 module BetterAuthExamples
   class DashboardApp
+    DASHBOARD_VIEWS = %w[home sessions social plugins database settings].freeze
+    DASHBOARD_PATHS = DASHBOARD_VIEWS.to_h do |view|
+      [view, (view == "home") ? "/" : "/#{view}"]
+    end.freeze
+
     attr_reader :registry, :framework_name
 
     def initialize(registry, framework_name:)
@@ -16,16 +21,23 @@ module BetterAuthExamples
 
     def call(env)
       request = Rack::Request.new(env)
+      return html_response(render_html) if dashboard_request?(request)
+
       case [request.request_method, request.path_info]
-      when ["GET", "/"]
-        html_response(render_html)
       when ["GET", "/example/settings"]
         json_response({settings: Settings.from_request(request), framework: framework_name})
       when ["POST", "/example/settings"]
         update_settings(request)
       when ["GET", "/example/database"]
         settings = Settings.from_request(request)
-        json_response(registry.explore(settings).merge(settings: settings))
+        json_response(
+          registry.explore(
+            settings,
+            table: request.params["table"],
+            limit: request.params["limit"],
+            offset: request.params["offset"]
+          ).merge(settings: settings)
+        )
       when ["POST", "/example/database/delete"]
         delete_records(request)
       when ["GET", "/example/plugins"]
@@ -33,6 +45,9 @@ module BetterAuthExamples
         json_response(
           {
             plugins: PluginCatalog.metadata_for(registry.auth_for(settings)),
+            available: PluginCatalog.available_plugins(app_name: registry.app_name),
+            disabled: settings[:disabled_plugins],
+            settings: settings,
             deliveries: PluginCatalog.deliveries,
             excluded: PluginCatalog::EXCLUDED_PLUGIN_IDS
           }
@@ -40,6 +55,8 @@ module BetterAuthExamples
       when ["POST", "/example/plugins/clear-deliveries"]
         PluginCatalog.clear_deliveries!
         json_response({ok: true, deliveries: []})
+      when ["POST", "/example/admin/promote-current-user"]
+        promote_current_user(request)
       when ["GET", "/example/social-providers"]
         json_response({providers: SocialProviderCatalog.metadata})
       when ["POST", "/example/reset"]
@@ -53,13 +70,21 @@ module BetterAuthExamples
 
     private
 
+    def dashboard_request?(request)
+      request.get? && DASHBOARD_PATHS.value?(request.path_info)
+    end
+
     def update_settings(request)
       previous = Settings.from_request(request)
       settings = Settings.normalize(parsed_body(request))
-      registry.reset!(previous) if previous != settings
+      changed = previous != settings
+      registry.reload!(previous) if changed
+      expire_auth_cookies = auth_cookies_expire_on_settings_change?(previous, settings)
+      cookies = [Settings.set_cookie_header(settings)]
+      cookies.concat(Settings.clear_auth_cookie_headers(request)) if expire_auth_cookies
       json_response(
-        {settings: settings},
-        headers: {"set-cookie" => ([Settings.set_cookie_header(settings)] + Settings.clear_auth_cookie_headers).join("\n")}
+        {settings: settings, auth_cookies_cleared: expire_auth_cookies},
+        headers: {"set-cookie" => cookies.join("\n")}
       )
     end
 
@@ -68,7 +93,7 @@ module BetterAuthExamples
       registry.reset_database!(settings)
       json_response(
         {ok: true, settings: settings},
-        headers: {"set-cookie" => Settings.clear_auth_cookie_headers.join("\n")}
+        headers: {"set-cookie" => Settings.clear_auth_cookie_headers(request).join("\n")}
       )
     end
 
@@ -77,6 +102,22 @@ module BetterAuthExamples
       body = parsed_body(request)
       result = registry.delete_records!(settings, body["table"] || body[:table], body["ids"] || body[:ids])
       json_response({ok: true}.merge(result))
+    end
+
+    def promote_current_user(request)
+      settings = Settings.from_request(request)
+      auth = registry.auth_for(settings)
+      session = auth.api.get_session(headers: {"cookie" => request.get_header("HTTP_COOKIE").to_s})
+      user = session && (session[:user] || session["user"])
+      return json_response({error: "Sign in before promoting a user."}, status: 401) unless user && user["id"]
+
+      updated = auth.context.internal_adapter.update_user(user["id"], role: "admin")
+      json_response({ok: true, user: updated})
+    end
+
+    def auth_cookies_expire_on_settings_change?(previous, settings)
+      previous[:database] != settings[:database] ||
+        Array(previous[:disabled_plugins]).sort != Array(settings[:disabled_plugins]).sort
     end
 
     def parsed_body(request)
@@ -126,23 +167,26 @@ module BetterAuthExamples
         <title>Better Auth Ruby Examples</title>
         <style>
           :root {
-            color-scheme: light;
-            --bg: #fafafa;
-            --panel: #ffffff;
-            --panel-2: #f4f4f5;
-            --panel-3: #ededee;
-            --line: #e5e5e5;
-            --line-strong: #d4d4d4;
-            --text: #171717;
-            --muted: #666666;
-            --soft: #8a8a8a;
-            --accent: #171717;
-            --accent-2: #f0f0f0;
-            --danger: #b42318;
-            --danger-bg: #fff1f0;
-            --ok: #166534;
-            --ok-bg: #f0fdf4;
-            --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 16px 34px rgba(0, 0, 0, .05);
+            color-scheme: dark;
+            --bg: oklch(0.105 0.004 260);
+            --sidebar: oklch(0.085 0.004 260);
+            --surface: oklch(0.125 0.004 260);
+            --panel: oklch(0.16 0.005 260);
+            --panel-2: oklch(0.205 0.006 260);
+            --panel-3: oklch(0.245 0.007 260);
+            --line: oklch(0.255 0.006 260);
+            --line-strong: oklch(0.34 0.008 260);
+            --text: oklch(0.91 0.006 260);
+            --muted: oklch(0.67 0.007 260);
+            --soft: oklch(0.52 0.008 260);
+            --accent: oklch(0.665 0.16 275);
+            --accent-2: oklch(0.25 0.05 275);
+            --danger: oklch(0.7 0.18 25);
+            --danger-bg: oklch(0.21 0.045 25);
+            --ok: oklch(0.72 0.13 155);
+            --ok-bg: oklch(0.21 0.04 155);
+            --warning: oklch(0.75 0.13 75);
+            --shadow: 0 18px 55px oklch(0.03 0.004 260 / .36);
             --mono: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
           }
           * { box-sizing: border-box; }
@@ -150,164 +194,240 @@ module BetterAuthExamples
             margin: 0;
             background: var(--bg);
             color: var(--text);
-            font-family: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
             font-size: 14px;
-            line-height: 1.45;
+            line-height: 1.42;
+            text-rendering: geometricPrecision;
           }
-          button, input, select { font: inherit; }
-          textarea { width: 100%; min-width: 0; font: inherit; }
-          .shell { display: grid; grid-template-columns: 244px minmax(0, 1fr); min-height: 100dvh; }
-          .sidebar { border-right: 1px solid var(--line); background: #fff; padding: 18px 12px; position: sticky; top: 0; height: 100dvh; }
-          .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.02em; margin: 0 8px 4px; }
-          .brand-mark { width: 28px; height: 28px; border-radius: 7px; background: #171717; color: #fff; display: grid; place-items: center; font-family: var(--mono); font-size: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
-          .framework { color: var(--muted); font-size: 12px; margin: 0 8px 26px 46px; }
-          .nav { display: grid; gap: 5px; }
-          .nav button { border: 1px solid transparent; background: transparent; color: #525252; text-align: left; border-radius: 8px; padding: 9px 10px; cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease; display: flex; align-items: center; gap: 10px; font-weight: 500; }
-          .nav button:active, .button:active { transform: translateY(1px); }
-          .nav button.active { background: #ededed; border-color: transparent; color: var(--text); }
-          .nav button:hover { background: var(--panel-2); color: var(--text); }
-          .nav-icon, .icon { width: 17px; height: 17px; display: inline-block; flex: 0 0 auto; }
-          .nav-icon svg, .icon svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-          main { padding: 22px 30px 30px; min-width: 0; }
-          .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -22px -30px 24px; padding: 14px 30px; border-bottom: 1px solid var(--line); background: #fff; position: sticky; top: 0; z-index: 3; }
-          h1 { font-size: 22px; margin: 0 0 5px; line-height: 1.08; letter-spacing: -.045em; }
-          h2 { font-size: 15px; margin: 0 0 14px; letter-spacing: -.018em; }
-          .status { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
-          .pill { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 4px 8px; }
-          .grid { display: grid; gap: 14px; }
+          button, input, select, textarea { font: inherit; }
+          button { -webkit-tap-highlight-color: transparent; }
+          textarea { width: 100%; min-width: 0; }
+          .shell { display: grid; grid-template-columns: 246px minmax(0, 1fr); min-height: 100dvh; background: var(--bg); }
+          .sidebar { border-right: 1px solid var(--line); background: var(--sidebar); padding: 18px 12px; position: sticky; top: 0; height: 100dvh; }
+          .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; margin: 0 8px 3px; color: var(--text); }
+          .brand-mark { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: oklch(0.98 0.005 275); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; box-shadow: inset 0 1px 0 oklch(1 0 0 / .18); }
+          .framework { color: var(--muted); font-size: 12px; margin: 0 8px 24px 46px; }
+          .nav { display: grid; gap: 3px; }
+          .nav button {
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--muted);
+            text-align: left;
+            border-radius: 7px;
+            padding: 8px 10px;
+            cursor: pointer;
+            transition: background .16s ease, border-color .16s ease, color .16s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 560;
+          }
+          .nav button.active { background: var(--panel-2); border-color: oklch(1 0 0 / .035); color: var(--text); }
+          .nav button:hover { background: var(--panel); color: var(--text); }
+          .nav-icon, .icon { width: 17px; height: 17px; display: inline-block; flex: 0 0 auto; color: currentColor; }
+          .nav-icon svg, .icon svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 1.75; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+          ::-webkit-scrollbar { width: 10px; height: 10px; }
+          ::-webkit-scrollbar-track { background: oklch(0.09 0.004 260); }
+          ::-webkit-scrollbar-thumb { background: oklch(0.34 0.008 260); border: 3px solid oklch(0.09 0.004 260); border-radius: 999px; }
+          ::-webkit-scrollbar-thumb:hover { background: oklch(0.46 0.01 260); }
+          main { min-width: 0; min-height: 100dvh; padding: 0 0 18px; background: var(--bg); overflow: hidden; }
+          .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: 68px;
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--line);
+            background: var(--surface);
+            position: sticky;
+            top: 0;
+            z-index: 30;
+          }
+          h1 { font-size: 18px; margin: 0 0 6px; line-height: 1.15; font-weight: 680; }
+          h2 { font-size: 14px; margin: 0 0 14px; line-height: 1.25; font-weight: 660; }
+          .status { display: flex; gap: 7px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+          .pill { border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 4px 8px; }
+          .grid { display: grid; gap: 12px; padding: 24px; min-height: 0; }
+          .database-grid { padding-top: 18px; }
           .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 18px; }
-          label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
-          input, select {
+          .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: none; padding: 18px; }
+          label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 520; }
+          input, select, textarea {
             width: 100%;
             border: 1px solid var(--line);
-            border-radius: 8px;
-            background: #ffffff;
+            border-radius: 7px;
+            background: var(--surface);
             color: var(--text);
             padding: 9px 10px;
-            transition: border-color .18s ease, box-shadow .18s ease;
+            transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
           }
-          input:focus, select:focus, button:focus { outline: 2px solid rgba(0, 0, 0, .12); outline-offset: 1px; }
+          input::placeholder, textarea::placeholder { color: var(--soft); }
+          input:focus, select:focus, textarea:focus, button:focus {
+            outline: 2px solid oklch(0.665 0.16 275 / .36);
+            outline-offset: 1px;
+          }
+          input:focus, select:focus, textarea:focus { border-color: oklch(0.55 0.08 275); background: oklch(0.145 0.006 260); }
           .form { display: grid; gap: 10px; }
           .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
           .button {
             border: 1px solid var(--line);
-            background: #ffffff;
+            background: var(--panel-2);
             color: var(--text);
-            border-radius: 8px;
+            border-radius: 7px;
             padding: 8px 12px;
             cursor: pointer;
-            transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+            transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            font-weight: 560;
           }
-          .button.primary { background: var(--accent); color: white; border-color: var(--accent); box-shadow: none; }
-          .button.danger { color: var(--danger); background: var(--danger-bg); border-color: #ffd0cc; }
-          .button:hover { border-color: var(--line-strong); box-shadow: 0 2px 8px rgba(0,0,0,.05); }
-          .button:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
-          .button.icon-only { width: 38px; height: 38px; display: inline-grid; place-items: center; padding: 0; }
-          .avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--panel-2); display: inline-grid; place-items: center; overflow: hidden; border: 1px solid var(--line); font-weight: 650; }
+          .button.primary { background: var(--accent); color: oklch(0.98 0.006 275); border-color: oklch(0.72 0.14 275); }
+          .button.danger { color: oklch(0.86 0.08 25); background: var(--danger-bg); border-color: oklch(0.42 0.07 25); }
+          .button:hover { background: var(--panel-3); border-color: var(--line-strong); }
+          .button.primary:hover { background: oklch(0.71 0.16 275); border-color: oklch(0.76 0.14 275); }
+          .button:active { transform: translateY(1px); }
+          .button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+          .button.icon-only { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; }
+          .avatar { width: 42px; height: 42px; border-radius: 50%; background: var(--panel-2); display: inline-grid; place-items: center; overflow: hidden; border: 1px solid var(--line); font-weight: 650; }
           .avatar img { width: 100%; height: 100%; object-fit: cover; }
           .profile { display: flex; align-items: center; gap: 12px; }
           .muted { color: var(--muted); }
-          pre { margin: 0; white-space: pre-wrap; overflow: auto; max-height: 280px; background: #fafafa; border: 1px solid var(--line); border-radius: 8px; padding: 11px; font: 12px/1.55 var(--mono); }
-          .database-studio { display: grid; grid-template-columns: 304px minmax(0, 1fr); height: min(760px, calc(100dvh - 132px)); border: 1px solid var(--line); background: #fff; border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); }
-          .database-rail { border-right: 1px solid var(--line); background: #fbfbfb; padding: 16px 14px; min-width: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto auto; overflow: hidden; }
-          .rail-title { font-size: 24px; font-weight: 700; letter-spacing: -.05em; margin: 0 0 2px; }
-          .rail-subtitle { color: #404040; font-size: 13px; margin: 0 0 18px; font-weight: 500; }
-          .database-select { border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; padding: 10px 11px; margin-bottom: 8px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+          pre { margin: 0; white-space: pre-wrap; overflow: auto; max-height: 280px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 11px; font: 12px/1.55 var(--mono); }
+          .database-studio { display: grid; grid-template-columns: 286px minmax(0, 1fr); height: calc(100dvh - 124px); min-height: 420px; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: inset 0 1px 0 oklch(1 0 0 / .025); }
+          .database-rail { border-right: 1px solid var(--line); background: linear-gradient(180deg, var(--surface), oklch(0.105 0.004 260)); padding: 18px 14px 14px; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto auto; overflow: hidden; }
+          .rail-title { font-size: 21px; font-weight: 720; margin: 0 0 3px; }
+          .rail-subtitle { color: var(--muted); font-size: 13px; margin: 0 0 16px; font-weight: 500; }
+          .database-provider-control { margin-bottom: 12px; }
+          .database-provider-control label { display: grid; gap: 6px; color: var(--soft); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+          .database-provider-select { width: 100%; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; background: oklch(0.135 0.005 260); color: var(--text); padding: 0 38px 0 12px; font-size: 15px; font-weight: 680; box-shadow: inset 0 1px 0 oklch(1 0 0 / .025); cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 21px, calc(100% - 13px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+          .database-provider-select:hover { border-color: var(--line-strong); background-color: oklch(0.15 0.006 260); }
+          .database-provider-select:focus { outline: 2px solid oklch(0.68 0.14 275 / .38); outline-offset: 2px; }
           .schema-card { border: 0; background: transparent; padding: 0; margin-bottom: 10px; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
-          .schema-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+          .schema-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 10px; }
           .schema-name { font-weight: 620; }
           .table-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 10px; }
           .table-search input { padding: 8px 10px; }
           .icon-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; }
-          .table-tabs { display: grid; gap: 2px; min-height: 0; overflow: auto; padding-right: 3px; align-content: start; grid-auto-rows: min-content; }
-          .table-tabs button { border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 8px 9px; min-height: 36px; cursor: pointer; color: #525252; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; font-weight: 500; }
-          .table-tabs button:hover { background: #fff; border-color: var(--line); color: var(--text); }
-          .table-tabs button.active { color: var(--text); background: #ededed; border-color: transparent; }
+          .table-tabs { display: grid; gap: 4px; min-height: 0; overflow: auto; padding: 2px 2px 4px 0; align-content: start; grid-auto-rows: min-content; }
+          .table-tabs button { border: 1px solid transparent; background: transparent; border-radius: 9px; padding: 9px 10px; min-height: 38px; cursor: pointer; color: var(--muted); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; text-align: left; font-weight: 560; }
+          .table-tabs button:hover { background: oklch(0.16 0.005 260); border-color: var(--line); color: var(--text); }
+          .table-tabs button.active { color: var(--text); background: var(--panel-2); border-color: oklch(1 0 0 / .035); box-shadow: inset 0 1px 0 oklch(1 0 0 / .035); }
           .table-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .table-count { color: var(--soft); font: 11px var(--mono); }
-          .database-main { min-width: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #fff; }
-          .db-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fff; position: relative; z-index: 5; }
+          .database-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); background: var(--panel); }
+          .db-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border-bottom: 1px solid var(--line); background: var(--surface); position: relative; z-index: 5; }
           .toolbar-left, .toolbar-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+          .toolbar-right { justify-content: flex-end; min-width: 0; }
           .table-meta { padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
           .columns-popover { position: relative; z-index: 6; }
-          .columns { position: absolute; right: 0; top: calc(100% + 8px); width: min(320px, 76vw); display: none; grid-template-columns: 1fr; gap: 7px; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 44px rgba(0,0,0,.16); max-height: 360px; overflow: auto; z-index: 20; }
+          .columns { position: absolute; right: 0; top: calc(100% + 8px); width: min(320px, 76vw); display: none; grid-template-columns: 1fr; gap: 7px; padding: 12px; background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow); max-height: 360px; overflow: auto; z-index: 20; }
           .columns.open { display: grid; }
           .columns label { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 12px; min-width: 0; }
           .columns input { width: auto; }
-          .records { min-height: 0; overflow: auto; background: #fff; }
+          .records { min-height: 0; overflow: auto; overscroll-behavior: contain; background: linear-gradient(180deg, var(--panel), oklch(0.145 0.005 260)); }
           table { width: 100%; border-collapse: separate; border-spacing: 0; font: 12px/1.45 var(--mono); }
-          th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          th { position: sticky; top: 0; background: #fafafa; z-index: 1; color: #666; font-weight: 600; }
-          tr:hover td { background: #fafafa; }
-          .row-selector { width: 28px; min-width: 28px; max-width: 28px; text-align: center; padding: 7px; }
-          .row-checkbox { width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 3px; display: inline-block; vertical-align: middle; background: #fff; }
-          .record-checkbox { width: 16px; height: 16px; margin: 0; vertical-align: middle; accent-color: #171717; }
-          .empty-row { padding: 32px 12px; text-align: center; color: var(--muted); font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-          .pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 12px; }
+          th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 9px 11px; text-align: left; vertical-align: top; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          th { position: sticky; top: 0; background: var(--surface); z-index: 1; color: var(--muted); font-weight: 600; }
+          tr:hover td { background: oklch(0.19 0.006 260); }
+          .row-selector { width: 44px; min-width: 44px; max-width: 44px; text-align: center; padding: 8px 12px; overflow: visible; text-overflow: clip; }
+          .row-checkbox, .record-checkbox {
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            border: 1px solid var(--line-strong);
+            border-radius: 4px;
+            display: inline-grid;
+            place-items: center;
+            vertical-align: middle;
+            background: var(--surface);
+            appearance: none;
+            cursor: pointer;
+          }
+          .record-checkbox:checked { background: var(--accent); border-color: oklch(0.72 0.14 275); }
+          .record-checkbox:checked::after { content: ""; width: 8px; height: 5px; border-left: 2px solid oklch(0.98 0.006 275); border-bottom: 2px solid oklch(0.98 0.006 275); transform: rotate(-45deg) translateY(-1px); }
+          .empty-row { padding: 52px 12px; text-align: center; color: var(--muted); font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+          .pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted); font-size: 12px; }
           .pager strong { color: var(--text); font-weight: 600; }
           .empty-state { padding: 42px 20px; text-align: center; color: var(--muted); }
           .plugins-panel { padding: 0; overflow: hidden; }
-          .plugins-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); background: oklch(0.985 0.004 260); }
+          .plugins-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
           .plugins-toolbar h2 { margin: 0 0 3px; }
           .plugins-panel > .notice { margin: 10px 16px 0; }
-          .plugin-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px; border-bottom: 1px solid var(--line); background: oklch(0.975 0.004 260); }
-          .plugin-tab { border: 1px solid transparent; background: transparent; color: #52525b; border-radius: 999px; padding: 7px 10px; cursor: pointer; white-space: nowrap; display: inline-flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; }
-          .plugin-tab:hover { background: oklch(0.94 0.006 260); color: var(--text); }
-          .plugin-tab.active { background: oklch(0.24 0.012 260); color: oklch(0.98 0.004 260); }
+          .plugin-tabs { display: grid; gap: 12px; padding: 14px 16px 16px; border-bottom: 1px solid var(--line); background: oklch(0.118 0.004 260); }
+          .plugin-filter-bar { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px); gap: 10px; align-items: center; }
+          .plugin-filter-bar label { gap: 5px; }
+          .plugin-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+          .plugin-filter-bar input:focus, .plugin-filter-bar select:focus { outline: 2px solid oklch(0.68 0.14 275 / .38); outline-offset: 2px; }
+          .plugin-availability { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+          .plugin-toggle { border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; background: var(--panel); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; color: var(--text); cursor: pointer; min-width: 0; }
+          .plugin-toggle:hover { border-color: var(--line-strong); background: var(--panel-2); }
+          .plugin-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+          .plugin-toggle-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .plugin-toggle-meta { color: var(--soft); font: 11px/1.3 var(--mono); white-space: nowrap; }
+          .plugin-toggle.disabled { color: var(--muted); background: oklch(0.118 0.004 260); }
+          .plugin-toggle.disabled .plugin-toggle-name { text-decoration: line-through; text-decoration-color: var(--soft); }
+          .plugin-stat { border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; background: var(--panel); }
+          .plugin-stat strong { display: block; color: var(--text); font: 13px/1.2 var(--mono); }
+          .plugin-stat span { color: var(--soft); font-size: 11px; }
+          .plugin-tab { border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: 999px; padding: 7px 10px; cursor: pointer; white-space: nowrap; display: inline-flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; }
+          .plugin-tab:hover { background: var(--panel-2); color: var(--text); }
+          .plugin-tab.active { background: var(--panel-3); color: var(--text); border-color: var(--line); }
           .plugin-tab-count { opacity: .68; font: 11px var(--mono); }
-          .plugin-sections { display: grid; background: #fff; }
+          .plugin-sections { display: grid; background: var(--panel); }
           .plugin-section { display: grid; gap: 16px; padding: 22px 22px 26px; border-top: 1px solid var(--line); }
           .plugin-section:first-child { border-top: 0; }
           .plugin-section-header { display: grid; gap: 12px; }
           .plugin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-          .plugin-heading h3 { margin: 0; font-size: 22px; line-height: 1.1; letter-spacing: -.035em; }
+          .plugin-heading h3 { margin: 0; font-size: 20px; line-height: 1.1; font-weight: 680; }
           .plugin-summary { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-          .plugin-description { max-width: 74ch; margin: 0; color: #3f3f46; font-size: 15px; line-height: 1.55; }
-          .plugin-details { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font: 12px/1.4 var(--mono); }
-          .plugin-capabilities { margin: 0; padding-left: 18px; color: #52525b; display: grid; gap: 4px; max-width: 76ch; }
+          .plugin-description { max-width: 74ch; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+          .plugin-details { display: flex; gap: 8px; flex-wrap: wrap; color: var(--soft); font: 12px/1.4 var(--mono); }
+          .plugin-capabilities { margin: 0; padding-left: 18px; color: var(--muted); display: grid; gap: 4px; max-width: 76ch; }
+          .plugin-admin-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
           .endpoint-actions { display: grid; gap: 9px; }
           .action-group { display: grid; gap: 9px; }
-          .action-group-title { margin: 2px 0 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
-          .endpoint-action { border: 1px solid var(--line); border-radius: 8px; background: oklch(0.995 0.002 260); overflow: hidden; }
+          .action-group-title { margin: 2px 0 0; font-size: 11px; color: var(--soft); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+          .endpoint-action { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
           .endpoint-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; }
-          .method-badge { min-width: 52px; text-align: center; border-radius: 6px; padding: 4px 7px; font: 11px var(--mono); color: oklch(0.26 0.012 260); background: oklch(0.93 0.008 260); }
-          .method-badge.post { color: oklch(0.34 0.08 255); background: oklch(0.94 0.028 255); }
-          .method-badge.get { color: oklch(0.34 0.07 155); background: oklch(0.95 0.03 155); }
-          .method-badge.delete { color: oklch(0.42 0.12 28); background: oklch(0.95 0.035 28); }
-          .endpoint-path { overflow-wrap: anywhere; font: 13px/1.35 var(--mono); color: #27272a; }
-          .action-label { display: block; color: #18181b; font-weight: 650; margin-bottom: 2px; font-family: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+          .method-badge { min-width: 52px; text-align: center; border-radius: 6px; padding: 4px 7px; font: 11px var(--mono); color: var(--muted); background: var(--panel-2); }
+          .method-badge.post { color: oklch(0.78 0.09 255); background: oklch(0.23 0.045 255); }
+          .method-badge.get { color: oklch(0.78 0.09 155); background: oklch(0.22 0.042 155); }
+          .method-badge.delete { color: oklch(0.8 0.1 25); background: var(--danger-bg); }
+          .endpoint-path { overflow-wrap: anywhere; font: 13px/1.35 var(--mono); color: var(--text); }
+          .action-label { display: block; color: var(--text); font-weight: 650; margin-bottom: 2px; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
           .endpoint-payload { border-top: 1px solid var(--line); padding: 8px 10px 10px; }
-          .endpoint-payload summary { cursor: pointer; color: #52525b; font-size: 12px; margin-bottom: 8px; font-weight: 650; }
-          .endpoint-payload textarea { display: block; min-height: 154px; resize: vertical; font: 12px/1.55 var(--mono); border-radius: 7px; background: oklch(0.985 0.003 260); color: #27272a; border: 1px solid var(--line); padding: 11px 12px; tab-size: 2; }
-          .endpoint-payload textarea:focus { outline: 2px solid oklch(0.72 0.08 255 / .45); outline-offset: 1px; border-color: oklch(0.72 0.08 255); background: #fff; }
-          .endpoint-output { margin: 0 10px 10px; max-height: 220px; font-size: 11px; background: oklch(0.985 0.003 260); }
+          .endpoint-payload summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-bottom: 8px; font-weight: 650; }
+          .endpoint-payload textarea { display: block; min-height: 154px; resize: vertical; font: 12px/1.55 var(--mono); border-radius: 7px; tab-size: 2; }
+          .endpoint-output { margin: 0 10px 10px; max-height: 220px; font-size: 11px; }
           .plugin-empty { padding: 32px 18px; color: var(--muted); }
           .delivery-list { display: grid; gap: 8px; }
-          .delivery-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fafafa; }
+          .delivery-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--surface); }
+          .plugin-title { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-weight: 620; }
           .social-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
           .social-button { min-height: 42px; justify-content: flex-start; }
           .notice { min-height: 20px; color: var(--muted); margin: 10px 0 0; }
           .notice.error { color: var(--danger); }
           .notice.ok { color: var(--ok); }
-          dialog { border: 0; border-radius: 16px; padding: 0; width: min(460px, calc(100vw - 32px)); box-shadow: 0 24px 80px rgba(15, 23, 42, .28); }
-          dialog::backdrop { background: rgba(15, 23, 42, .32); backdrop-filter: blur(4px); }
-          .dialog-body { padding: 22px; background: #fff; border: 1px solid var(--line); border-radius: 16px; }
+          dialog { border: 0; border-radius: 14px; padding: 0; width: min(460px, calc(100vw - 32px)); color: var(--text); background: transparent; box-shadow: var(--shadow); }
+          dialog::backdrop { background: oklch(0.03 0.004 260 / .68); backdrop-filter: blur(4px); }
+          .dialog-body { padding: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
           .dialog-body p { color: var(--muted); margin: 0 0 18px; }
-          .dialog-title { font-size: 18px; font-weight: 720; letter-spacing: -.025em; margin: 0 0 8px; }
+          .dialog-title { font-size: 18px; font-weight: 700; margin: 0 0 8px; color: var(--text); }
           [hidden] { display: none !important; }
           @media (max-width: 840px) {
             .shell { grid-template-columns: 1fr; }
-            .sidebar { position: static; height: auto; }
+            .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+            .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .two { grid-template-columns: 1fr; }
-            main { padding: 16px; }
-            .plugins-toolbar, .plugin-heading, .endpoint-line { grid-template-columns: 1fr; display: grid; }
+            .topbar { position: static; padding: 14px 16px; }
+            .grid { padding: 16px; }
+            .plugins-toolbar, .plugin-filter-bar, .plugin-heading, .endpoint-line { grid-template-columns: 1fr; display: grid; }
+            .plugin-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .plugin-summary { justify-content: flex-start; }
-            .database-studio { grid-template-columns: 1fr; }
+            .database-studio { grid-template-columns: 1fr; height: auto; }
             .database-rail { border-right: 0; border-bottom: 1px solid var(--line); }
             .records { max-height: 58dvh; }
           }
@@ -423,14 +543,19 @@ module BetterAuthExamples
               </div>
             </section>
 
-            <section data-view="database" hidden class="grid">
+            <section data-view="database" hidden class="grid database-grid">
               <div class="database-studio">
                 <aside class="database-rail">
                   <p class="rail-title">Tables</p>
                   <p class="rail-subtitle">Better Auth schema explorer</p>
-                  <div class="database-select">
-                    <span id="database-provider-label">memory</span>
-                    <span class="muted">provider</span>
+                  <div class="database-provider-control">
+                    <label>Provider
+                      <select id="database-provider-select" class="database-provider-select">
+                        <% BetterAuthExamples::Settings::DATABASES.each do |database| %>
+                          <option value="<%= database %>"><%= database %></option>
+                        <% end %>
+                      </select>
+                    </label>
                   </div>
                   <div class="schema-card">
                     <div class="schema-header">
@@ -461,21 +586,21 @@ module BetterAuthExamples
                       <button class="button danger" id="delete-records" type="button" disabled>Delete selected</button>
                     </div>
                     <div class="toolbar-right">
+                      <div class="pager">
+                        <span id="page-label">0 rows</span>
+                        <button class="button icon-only" id="prev-page" title="Previous page" aria-label="Previous page" type="button">
+                          <span class="icon"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span>
+                        </button>
+                        <strong id="page-size-label">50</strong>
+                        <button class="button icon-only" id="next-page" title="Next page" aria-label="Next page" type="button">
+                          <span class="icon"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+                        </button>
+                      </div>
                       <span class="muted" id="active-table-label">No table selected</span>
                     </div>
                   </div>
                   <div id="table-meta" class="table-meta"></div>
                   <div class="records" id="records"></div>
-                  <div class="pager">
-                    <span id="page-label">0 rows</span>
-                    <button class="button icon-only" id="prev-page" title="Previous page" aria-label="Previous page" type="button">
-                      <span class="icon"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span>
-                    </button>
-                    <strong id="page-size-label">50</strong>
-                    <button class="button icon-only" id="next-page" title="Next page" aria-label="Next page" type="button">
-                      <span class="icon"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
-                    </button>
-                  </div>
                 </div>
               </div>
             </section>
@@ -524,8 +649,10 @@ module BetterAuthExamples
           </div>
         </dialog>
         <script>
-          const state = { settings: {}, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50, plugins: [], activePlugin: "all", deliveries: [], excludedPlugins: [] };
+          const state = { settings: {}, tables: [], activeTable: null, visibleColumns: new Set(), selectedIds: new Set(), page: 0, pageSize: 50, plugins: [], availablePlugins: [], activePlugin: "all", pluginQuery: "", deliveries: [], excludedPlugins: [] };
           const SETTINGS_STORAGE_KEY = "better_auth_example_settings";
+          const VIEW_PATHS = { home: "/", sessions: "/sessions", social: "/social", plugins: "/plugins", database: "/database", settings: "/settings" };
+          const PATH_VIEWS = Object.fromEntries(Object.entries(VIEW_PATHS).map(([view, path]) => [path, view]));
           const $ = (selector) => document.querySelector(selector);
           const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -582,19 +709,54 @@ module BetterAuthExamples
             })[char]);
           }
 
-          function setView(view) {
-            $$("[data-view]").forEach((el) => el.hidden = el.dataset.view !== view);
-            $$("[data-view-button]").forEach((el) => el.classList.toggle("active", el.dataset.viewButton === view));
-            $("#view-title").textContent = view[0].toUpperCase() + view.slice(1);
-            if (view === "database") loadDatabase();
-            if (view === "plugins") loadPlugins();
+          function viewFromLocation() {
+            return PATH_VIEWS[window.location.pathname] || "home";
+          }
+
+          function readPluginFiltersFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            state.activePlugin = params.get("plugin") || "all";
+            state.pluginQuery = params.get("q") || "";
+          }
+
+          function viewURL(view) {
+            const url = new URL(window.location.href);
+            url.pathname = VIEW_PATHS[view] || "/";
+            url.search = "";
+            if (view === "plugins") {
+              const plugin = state.activePlugin === "all" ? "" : state.activePlugin;
+              if (plugin) url.searchParams.set("plugin", plugin);
+              if (state.pluginQuery.trim()) url.searchParams.set("q", state.pluginQuery.trim());
+            }
+            return `${url.pathname}${url.search}`;
+          }
+
+          function syncURL(view, mode = "push") {
+            const nextURL = viewURL(view);
+            const currentURL = `${window.location.pathname}${window.location.search}`;
+            if (nextURL === currentURL) return;
+            const method = mode === "replace" ? "replaceState" : "pushState";
+            window.history[method]({view}, "", nextURL);
+          }
+
+          function setView(view, options = {}) {
+            const nextView = VIEW_PATHS[view] ? view : "home";
+            const shouldSyncURL = options.syncURL !== false;
+            const urlMode = options.urlMode || "push";
+            if (nextView === "plugins" && options.readURL) readPluginFiltersFromURL();
+            $$("[data-view]").forEach((el) => el.hidden = el.dataset.view !== nextView);
+            $$("[data-view-button]").forEach((el) => el.classList.toggle("active", el.dataset.viewButton === nextView));
+            $("#view-title").textContent = nextView[0].toUpperCase() + nextView.slice(1);
+            if (shouldSyncURL) syncURL(nextView, urlMode);
+            if (nextView === "database") loadDatabase();
+            if (nextView === "plugins") loadPlugins();
           }
 
           function renderSettings() {
             $("#database-pill").textContent = `database: ${state.settings.database || "memory"}`;
             $("#rate-pill").textContent = `rate: ${state.settings.rate_adapter || "memory"} (${state.settings.rate_max || 100}/${state.settings.rate_window || 10}s)`;
             $("#settings-json").textContent = JSON.stringify(state.settings, null, 2);
-            $("#database-provider-label").textContent = state.settings.database || "memory";
+            $("#database-provider-select").value = state.settings.database || "memory";
             const form = $("#settings-form");
             for (const [key, value] of Object.entries(state.settings)) {
               if (form.elements[key]) form.elements[key].value = value;
@@ -679,37 +841,106 @@ module BetterAuthExamples
             }
           }
 
-          function renderPlugins() {
-            if (!state.plugins.some((plugin) => plugin.id === state.activePlugin)) state.activePlugin = "all";
-            renderPluginTabs();
-            const visiblePlugins = state.activePlugin === "all"
+          function pluginMatchesQuery(plugin, query) {
+            if (!query) return true;
+            const haystack = [
+              plugin.id,
+              plugin.description,
+              (plugin.schema_tables || []).join(" "),
+              (plugin.endpoint_actions || []).map((action) => `${action.method || "GET"} ${action.path}`).join(" ")
+            ].join(" ").toLowerCase();
+            return haystack.includes(query);
+          }
+
+          function selectedPlugins() {
+            return state.activePlugin === "all"
               ? state.plugins
               : state.plugins.filter((plugin) => plugin.id === state.activePlugin);
-            $("#plugin-sections").innerHTML = visiblePlugins.map(renderPluginSection).join("") || `<div class="plugin-empty">No plugins enabled.</div>`;
-            $$("[data-run-endpoint]").forEach((button) => {
-              button.onclick = () => runPluginEndpoint(button);
-            });
+          }
 
+          function visiblePlugins() {
+            const query = state.pluginQuery.trim().toLowerCase();
+            return selectedPlugins().filter((plugin) => pluginMatchesQuery(plugin, query));
+          }
+
+          function renderPlugins() {
+            if (state.activePlugin !== "all" && !state.plugins.some((plugin) => plugin.id === state.activePlugin)) {
+              state.activePlugin = "all";
+              syncURL("plugins", "replace");
+            }
+            renderPluginTabs();
+            renderPluginSections();
             renderDeliveries();
             $("#excluded-plugins").textContent = JSON.stringify(state.excludedPlugins, null, 2);
           }
 
-          function renderPluginTabs() {
-            const totalEndpoints = state.plugins.reduce((sum, plugin) => sum + ((plugin.endpoint_actions || plugin.endpoints || []).length), 0);
-            const tabs = [{id: "all", label: "All", count: totalEndpoints}].concat(
-              state.plugins.map((plugin) => ({id: plugin.id, label: plugin.id, count: (plugin.endpoint_actions || plugin.endpoints || []).length}))
-            );
-            $("#plugin-tabs").innerHTML = tabs.map((tab) => (
-              `<button class="plugin-tab ${state.activePlugin === tab.id ? "active" : ""}" type="button" data-plugin-tab="${escapeHTML(tab.id)}">
-                <span>${escapeHTML(tab.label)}</span><span class="plugin-tab-count">${escapeHTML(tab.count)}</span>
-              </button>`
-            )).join("");
-            $$("[data-plugin-tab]").forEach((button) => {
-              button.onclick = () => {
-                state.activePlugin = button.dataset.pluginTab;
-                renderPlugins();
-              };
+          function renderPluginSections() {
+            const plugins = visiblePlugins();
+            $("#plugin-sections").innerHTML = plugins.map(renderPluginSection).join("") || `<div class="plugin-empty">No plugins found.</div>`;
+            $$("[data-run-endpoint]").forEach((button) => {
+              button.onclick = () => runPluginEndpoint(button);
             });
+            const promoteAdmin = $("#promote-admin");
+            if (promoteAdmin) promoteAdmin.onclick = promoteCurrentUserToAdmin;
+            renderPluginCounts();
+          }
+
+          function renderPluginCounts() {
+            const totalEndpoints = state.plugins.reduce((sum, plugin) => sum + ((plugin.endpoint_actions || plugin.endpoints || []).length), 0);
+            const totalTables = state.plugins.reduce((sum, plugin) => sum + ((plugin.schema_tables || []).length), 0);
+            const shownPlugins = visiblePlugins();
+            const shownEndpoints = shownPlugins.reduce((sum, plugin) => sum + ((plugin.endpoint_actions || plugin.endpoints || []).length), 0);
+            const shownTables = shownPlugins.reduce((sum, plugin) => sum + ((plugin.schema_tables || []).length), 0);
+            $("#plugin-counts").innerHTML = `
+              <div class="plugin-stat"><strong>${escapeHTML(shownPlugins.length)} / ${escapeHTML(state.plugins.length)}</strong><span>plugins shown</span></div>
+              <div class="plugin-stat"><strong>${escapeHTML(totalEndpoints)}</strong><span>total endpoints</span></div>
+              <div class="plugin-stat"><strong>${escapeHTML(shownEndpoints)}</strong><span>shown endpoints</span></div>
+              <div class="plugin-stat"><strong>${escapeHTML(shownTables)}</strong><span>shown tables</span></div>
+            `;
+          }
+
+          function renderPluginTabs() {
+            const disabledPlugins = new Set(state.settings.disabled_plugins || []);
+            const pluginOptions = [{id: "all", label: `All plugins (${state.plugins.length})`}].concat(
+              state.plugins.map((plugin) => ({id: plugin.id, label: `${plugin.id} (${(plugin.endpoint_actions || plugin.endpoints || []).length})`}))
+            );
+            $("#plugin-tabs").innerHTML = `
+              <div class="plugin-filter-bar">
+                <label>Search plugins
+                  <input id="plugin-filter" value="${escapeHTML(state.pluginQuery)}" placeholder="Search by plugin, endpoint, table">
+                </label>
+                <label>Plugin
+                  <select id="plugin-select">
+                    ${pluginOptions.map((option) => `<option value="${escapeHTML(option.id)}" ${state.activePlugin === option.id ? "selected" : ""}>${escapeHTML(option.label)}</option>`).join("")}
+                  </select>
+                </label>
+              </div>
+              <div class="plugin-availability">
+                ${state.availablePlugins.map((plugin) => {
+                  const disabled = disabledPlugins.has(plugin.id);
+                  return `<label class="plugin-toggle ${disabled ? "disabled" : ""}">
+                    <input type="checkbox" data-plugin-toggle="${escapeHTML(plugin.id)}" ${disabled ? "" : "checked"}>
+                    <span class="plugin-toggle-name">${escapeHTML(plugin.id)}</span>
+                    <span class="plugin-toggle-meta">${escapeHTML(plugin.endpoints)} ep / ${escapeHTML(plugin.tables)} tbl</span>
+                  </label>`;
+                }).join("")}
+              </div>
+              <div class="plugin-counts" id="plugin-counts"></div>
+            `;
+            $("#plugin-filter").oninput = (event) => {
+              state.pluginQuery = event.currentTarget.value;
+              syncURL("plugins", "replace");
+              renderPluginSections();
+            };
+            $("#plugin-select").onchange = (event) => {
+              state.activePlugin = event.currentTarget.value;
+              syncURL("plugins", "replace");
+              renderPlugins();
+            };
+            $$("[data-plugin-toggle]").forEach((input) => {
+              input.onchange = () => setPluginEnabled(input.dataset.pluginToggle, input.checked);
+            });
+            renderPluginCounts();
           }
 
           function renderPluginSection(plugin) {
@@ -721,6 +952,12 @@ module BetterAuthExamples
               .filter((example) => !endpointKeys.has(`${example.method} ${example.path}`));
             const workflows = workflowActions.map((action) => renderEndpointAction(action, "workflow")).join("");
             const actions = (plugin.endpoint_actions || []).map((action) => renderEndpointAction(action, "endpoint")).join("");
+            const adminTools = plugin.id === "admin"
+              ? `<div class="plugin-admin-tools">
+                  <button class="button" type="button" id="promote-admin">Grant current user admin</button>
+                  <span class="muted">Required before calling protected admin endpoints.</span>
+                </div>`
+              : "";
             return `<section class="plugin-section" id="plugin-${escapeHTML(plugin.id)}">
               <header class="plugin-section-header">
                 <div class="plugin-heading">
@@ -738,6 +975,7 @@ module BetterAuthExamples
                   <span>schema: ${escapeHTML(schema)}</span>
                   <span>hooks: ${escapeHTML(plugin.hooks.before)} before, ${escapeHTML(plugin.hooks.after)} after</span>
                 </div>
+                ${adminTools}
               </header>
               ${workflows ? `<div class="action-group"><p class="action-group-title">Workflow examples</p>${workflows}</div>` : ""}
               <div class="action-group">
@@ -805,17 +1043,45 @@ module BetterAuthExamples
             }
           }
 
+          async function promoteCurrentUserToAdmin() {
+            try {
+              const data = await jsonFetch("/example/admin/promote-current-user", { method: "POST", body: "{}" });
+              showNotice("#plugins-notice", `${data.user.email || "Current user"} is now admin.`, "ok");
+              await loadCurrentSession();
+              if (!$("[data-view='database']").hidden) await loadDatabase();
+            } catch (error) {
+              showNotice("#plugins-notice", error.message, "error");
+            }
+          }
+
           async function loadPlugins() {
             showNotice("#plugins-notice", "Loading plugins...");
             try {
               const data = await jsonFetch("/example/plugins");
               state.plugins = data.plugins || [];
+              state.availablePlugins = data.available || [];
+              state.settings = data.settings || {...state.settings, disabled_plugins: data.disabled || []};
               state.deliveries = data.deliveries || [];
               state.excludedPlugins = data.excluded || [];
+              renderSettings();
               renderPlugins();
               showNotice("#plugins-notice", "Plugins loaded.", "ok");
             } catch (error) {
               showNotice("#plugins-notice", error.message, "error");
+            }
+          }
+
+          async function setPluginEnabled(pluginId, enabled) {
+            const disabled = new Set(state.settings.disabled_plugins || []);
+            enabled ? disabled.delete(pluginId) : disabled.add(pluginId);
+            showNotice("#plugins-notice", `${enabled ? "Enabling" : "Disabling"} ${pluginId}...`);
+            try {
+              await applySettings({...state.settings, disabled_plugins: Array.from(disabled).sort()}, "#plugins-notice");
+              await loadPlugins();
+              showNotice("#plugins-notice", `${pluginId} ${enabled ? "enabled" : "disabled"}. Session cookies were cleared.`, "ok");
+            } catch (error) {
+              showNotice("#plugins-notice", error.message, "error");
+              await loadPlugins();
             }
           }
 
@@ -834,7 +1100,7 @@ module BetterAuthExamples
                 state.visibleColumns = new Set(table.columns);
                 state.selectedIds = new Set();
                 state.page = 0;
-                renderDatabase();
+                loadDatabase({preserveTable: true});
               };
               tabs.appendChild(button);
             });
@@ -873,11 +1139,11 @@ module BetterAuthExamples
               updateSelectionToolbar();
               return;
             }
-            const totalRows = table.rows.length;
+            const totalRows = Number(table.count || table.rows.length || 0);
             const totalPages = Math.max(1, Math.ceil(totalRows / state.pageSize));
             state.page = Math.min(state.page, totalPages - 1);
             const start = state.page * state.pageSize;
-            const visibleRows = table.rows.slice(start, start + state.pageSize);
+            const visibleRows = table.rows;
             const head = `<thead><tr><th class="row-selector"><span class="row-checkbox"></span></th>${columns.map((column) => `<th>${escapeHTML(column)}</th>`).join("")}</tr></thead>`;
             if (!table.rows.length) {
               $("#records").innerHTML = `<table>${head}<tbody><tr><td colspan="${columns.length + 1}" class="empty-row">This table has no records yet.</td></tr></tbody></table>`;
@@ -900,7 +1166,7 @@ module BetterAuthExamples
                 updateSelectionToolbar();
               };
             });
-            updatePager(table, start + 1, Math.min(start + state.pageSize, totalRows));
+            updatePager(table, start + 1, Math.min(start + visibleRows.length, totalRows));
             updateSelectionToolbar();
           }
 
@@ -919,8 +1185,8 @@ module BetterAuthExamples
               $("#page-label").textContent = "0 rows";
               return;
             }
-            const total = table.rows.length;
-            $("#page-label").textContent = total ? `${start}-${end} of ${total} loaded rows` : `${table.count} rows`;
+            const total = Number(table.count || table.rows.length || 0);
+            $("#page-label").textContent = total ? `${start}-${end} of ${total} rows` : `${total} rows`;
             $("#page-size-label").textContent = String(state.pageSize);
             $("#prev-page").disabled = state.page <= 0;
             $("#next-page").disabled = end >= total;
@@ -932,17 +1198,21 @@ module BetterAuthExamples
             return String(value);
           }
 
-          async function loadDatabase() {
+          async function loadDatabase(options = {}) {
             showNotice("#db-notice", "Loading tables...");
             try {
-              const previousTable = state.activeTable;
-              const data = await jsonFetch("/example/database");
+              const previousTable = options.preserveTable ? state.activeTable : null;
+              const params = new URLSearchParams();
+              params.set("limit", String(state.pageSize));
+              params.set("offset", String((options.preservePage ? state.page : 0) * state.pageSize));
+              if (options.preserveTable && state.activeTable) params.set("table", state.activeTable);
+              const data = await jsonFetch(`/example/database?${params.toString()}`);
               state.tables = data.tables || [];
               const nextTable = state.tables.find((table) => table.name === previousTable) || state.tables[0];
               state.activeTable = nextTable && nextTable.name;
               state.visibleColumns = new Set((nextTable && nextTable.columns) || []);
               state.selectedIds = new Set();
-              state.page = 0;
+              if (!options.preservePage) state.page = 0;
               renderDatabase();
               showNotice("#db-notice", "Tables loaded.", "ok");
             } catch (error) {
@@ -969,7 +1239,19 @@ module BetterAuthExamples
             if (!$("[data-view='database']").hidden) await loadDatabase();
           }
 
+          async function applySettings(nextSettings, noticeSelector) {
+            const data = await jsonFetch("/example/settings", { method: "POST", body: JSON.stringify(nextSettings) });
+            state.settings = data.settings;
+            renderSettings();
+            if (data.auth_cookies_cleared) renderProfile(null);
+            showNotice(noticeSelector, data.auth_cookies_cleared ? "Settings applied. Session cookies were cleared." : "Settings applied.", "ok");
+            await loadCurrentSession();
+            await loadSessions();
+            if (!$("[data-view='database']").hidden) await loadDatabase();
+          }
+
           $$("[data-view-button]").forEach((button) => button.onclick = () => setView(button.dataset.viewButton));
+          window.onpopstate = () => setView(viewFromLocation(), {syncURL: false, readURL: true});
           $("#refresh-all").onclick = refreshCurrentView;
           $("#load-session").onclick = loadCurrentSession;
           $("#load-sessions").onclick = loadSessions;
@@ -982,14 +1264,22 @@ module BetterAuthExamples
           $("#reload-db").onclick = loadDatabase;
           $("#reload-db-toolbar").onclick = loadDatabase;
           $("#table-filter").oninput = renderDatabase;
+          $("#database-provider-select").onchange = async (event) => {
+            try {
+              await applySettings({...state.settings, database: event.currentTarget.value}, "#db-notice");
+            } catch (error) {
+              event.currentTarget.value = state.settings.database || "memory";
+              showNotice("#db-notice", error.message, "error");
+            }
+          };
           $("#columns-button").onclick = () => $("#column-toggles").classList.toggle("open");
           $("#prev-page").onclick = () => {
             state.page = Math.max(0, state.page - 1);
-            renderDatabase();
+            loadDatabase({preserveTable: true, preservePage: true});
           };
           $("#next-page").onclick = () => {
             state.page += 1;
-            renderDatabase();
+            loadDatabase({preserveTable: true, preservePage: true});
           };
           $("#delete-records").onclick = async () => {
             const ids = Array.from(state.selectedIds);
@@ -1052,14 +1342,7 @@ module BetterAuthExamples
           $("#settings-form").onsubmit = async (event) => {
             event.preventDefault();
             try {
-              const data = await jsonFetch("/example/settings", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
-              state.settings = data.settings;
-              renderSettings();
-              renderProfile(null);
-              showNotice("#settings-notice", "Settings applied. Session cookies were cleared.", "ok");
-              await loadCurrentSession();
-              await loadSessions();
-              if (!$("[data-view='database']").hidden) await loadDatabase();
+              await applySettings({...state.settings, ...formData(event.currentTarget)}, "#settings-notice");
             } catch (error) {
               showNotice("#settings-notice", error.message, "error");
             }
@@ -1081,7 +1364,7 @@ module BetterAuthExamples
             }
           };
 
-          boot();
+          boot().then(() => setView(viewFromLocation(), {syncURL: false, readURL: true}));
         </script>
       </body>
       </html>

@@ -15,6 +15,7 @@ gem "better_auth-sso", path: "../../packages/better_auth-sso"
 gem "better_auth-stripe", path: "../../packages/better_auth-stripe"
 
 gem "puma"
+gem "rerun", require: false
 
 gem "mongo"
 gem "mysql2", "~> 0.5"

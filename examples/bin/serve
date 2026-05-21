@@ -4,6 +4,7 @@
 require "socket"
 
 ROOT = File.expand_path("..", __dir__)
+WATCH_DIRS = ["../../packages", "../shared", "."].freeze
 
 APPS = {
   "vanilla" => {
@@ -38,6 +39,9 @@ APPS = {
   }
 }.freeze
 
+watch = ARGV.delete("--watch")
+watch ||= ARGV.delete("-w")
+
 app_name = ARGV.shift || "rails"
 app = APPS.fetch(app_name) do
   warn "Unknown app #{app_name.inspect}. Use one of: #{APPS.keys.join(", ")}"
@@ -70,7 +74,11 @@ set_default_env(port)
 
 Dir.chdir(File.join(ROOT, app.fetch(:dir))) do
   command = app.fetch(:command).call(port)
+  command = ["bundle", "exec", "rerun", *WATCH_DIRS.flat_map { |dir| ["--dir", dir] }, "--", *command] if watch
   warn "Starting #{app_name} on http://localhost:#{port}"
+  warn "Watch mode enabled; restarting on changes under examples/#{app.fetch(:dir)}, examples/shared, and packages" if watch
   warn "BETTER_AUTH_URL=#{ENV.fetch("BETTER_AUTH_URL")}"
+  warn command.join(" ") if ENV["EXAMPLES_SERVE_DRY_RUN"] == "1"
+  exit 0 if ENV["EXAMPLES_SERVE_DRY_RUN"] == "1"
   exec(*command)
 end

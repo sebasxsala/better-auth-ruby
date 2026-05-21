@@ -17,6 +17,7 @@ gem "better_auth-stripe", path: "../../packages/better_auth-stripe"
 
 gem "puma"
 gem "rackup"
+gem "rerun", require: false
 gem "roda"
 
 gem "mongo"

@@ -19,7 +19,7 @@ module BetterAuthExamples
         description: "Adds custom fields to the user and session payloads. This example accepts nickname, exampleRole, and deviceName during sign-up/session creation.",
         allows: ["Store app-specific user profile fields.", "Attach custom session metadata."],
         examples: [
-          {label: "Use fields in sign up", method: "POST", path: "/api/auth/sign-up/email", body: {"name" => "Fields Example", "email" => "fields@example.com", "password" => "password123", "nickname" => "Ada", "exampleRole" => "member", "deviceName" => "browser"}}
+          {label: "Use fields in sign up", method: "POST", path: "/api/auth/sign-up/email", body: {"name" => "Fields Example", "email" => "fields@example.com", "password" => "password123", "nickname" => "Ada", "exampleRole" => "member", "deviceName" => "browser", "captchaResponse" => "example-token"}}
         ]
       },
       "admin" => {
@@ -38,9 +38,9 @@ module BetterAuthExamples
       },
       "api-key" => {
         description: "Adds API key management for machine-to-machine or developer-token access.",
-        allows: ["Create, list, update, verify, and revoke API keys.", "Attach metadata, permissions, and expiration to keys."],
+        allows: ["Create, list, update, verify, and revoke API keys.", "Attach metadata, permissions, and expiration to keys.", "Requires an active user session for browser-created keys."],
         examples: [
-          {label: "Create API key", method: "POST", path: "/api/auth/api-key/create", body: {"name" => "Example key"}},
+          {label: "Create key for current user", method: "POST", path: "/api/auth/api-key/create", body: {"name" => "Example key"}},
           {label: "List API keys", method: "GET", path: "/api/auth/api-key/list"}
         ]
       },
@@ -104,7 +104,7 @@ module BetterAuthExamples
         description: "Checks passwords against Have I Been Pwned before accepting them.",
         allows: ["Block compromised passwords.", "Keep the k-anonymity lookup pluggable for tests and local examples."],
         examples: [
-          {label: "Try sign up check", method: "POST", path: "/api/auth/sign-up/email", body: {"name" => "Pwned Check", "email" => "pwned-check@example.com", "password" => "password123"}}
+          {label: "Try sign up check", method: "POST", path: "/api/auth/sign-up/email", body: {"name" => "Pwned Check", "email" => "pwned-check@example.com", "password" => "password123", "captchaResponse" => "example-token"}}
         ]
       },
       "jwt" => {
@@ -303,7 +303,12 @@ module BetterAuthExamples
 
     module_function
 
-    def plugins(app_name:)
+    def plugins(app_name:, disabled_plugins: [])
+      disabled = Array(disabled_plugins).map(&:to_s)
+      all_plugins(app_name: app_name).reject { |plugin| disabled.include?(plugin.id.to_s) }
+    end
+
+    def all_plugins(app_name:)
       [
         BetterAuth::Plugins.additional_fields(
           user: {
@@ -399,6 +404,18 @@ module BetterAuthExamples
         ),
         BetterAuth::Plugins.have_i_been_pwned(range_lookup: ->(_prefix) { "" })
       ]
+    end
+
+    def available_plugins(app_name:)
+      all_plugins(app_name: app_name).map do |plugin|
+        docs = PLUGIN_DOCS.fetch(plugin.id, fallback_docs_for(plugin))
+        {
+          id: plugin.id,
+          description: docs.fetch(:description),
+          endpoints: endpoint_signatures(plugin).length,
+          tables: plugin.schema.keys.length
+        }
+      end.sort_by { |plugin| plugin[:id] }
     end
 
     def metadata_for(auth)

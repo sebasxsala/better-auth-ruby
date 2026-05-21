@@ -55,6 +55,18 @@ examples/bin/serve roda
 The launcher picks the first free port starting from the app default and sets
 `BETTER_AUTH_URL` plus the example database URLs for the isolated compose file.
 
+For day-to-day development, add `--watch` so the app restarts automatically when
+you change files in the selected example, `examples/shared`, or `packages`:
+
+```bash
+examples/bin/serve --watch rails
+examples/bin/serve --watch vanilla
+examples/bin/serve --watch sinatra
+examples/bin/serve --watch hanami
+examples/bin/serve --watch grape
+examples/bin/serve --watch roda
+```
+
 | App | Command | URL |
 | --- | --- | --- |
 | Vanilla Rack | `examples/bin/serve vanilla` | starts at <http://localhost:9292> |
