@@ -66,6 +66,16 @@ RSpec.describe BetterAuth::Hanami::Routing do
     expect(JSON.parse(response.body)).to eq("ok" => true)
   end
 
+  it "dispatches core endpoints through a real Hanami route set at a custom mount path" do
+    auth = BetterAuth.auth(secret: secret, database: :memory, base_path: "/auth")
+    router = build_hanami_router(auth, at: "/auth")
+
+    response = Rack::MockRequest.new(router).get("/auth/ok")
+
+    expect(response.status).to eq(200)
+    expect(JSON.parse(response.body)).to eq("ok" => true)
+  end
+
   it "dispatches plugin endpoints with request cookies and response Set-Cookie headers" do
     plugin = BetterAuth::Plugin.new(
       id: "hanami-plugin",
@@ -127,7 +137,7 @@ RSpec.describe BetterAuth::Hanami::Routing do
     "test-secret-that-is-long-enough-for-validation"
   end
 
-  def build_hanami_router(auth)
+  def build_hanami_router(auth, at: "/api/auth")
     require "hanami/routes"
     require "hanami/slice/router"
     require "dry/inflector"
@@ -135,7 +145,7 @@ RSpec.describe BetterAuth::Hanami::Routing do
     routes = Class.new(Hanami::Routes) do
       include BetterAuth::Hanami::Routing
 
-      better_auth auth: auth
+      better_auth auth: auth, at: at
     end
     Hanami::Slice::Router.new(routes: routes.routes, inflector: Dry::Inflector.new) {}
   end

@@ -47,6 +47,26 @@ RSpec.describe BetterAuth::Hanami::Migration do
     expect(migration).to include("index :action, unique: true")
   end
 
+  it "renders non-id foreign key targets with explicit keys" do
+    plugin = BetterAuth::Plugin.new(
+      id: "profile",
+      schema: {
+        profile: {
+          model_name: "profiles",
+          fields: {
+            id: {type: "string", required: true},
+            ownerEmail: {type: "string", required: true, field_name: "owner_email", references: {model: "user", field: "email"}}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(secret: secret, database: :memory, plugins: [plugin])
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("foreign_key :owner_email, :users, type: String, null: false, key: :email, on_delete: :cascade")
+  end
+
   it "renders bigint number fields for database rate limit millisecond timestamps" do
     rate_limit_config = BetterAuth::Configuration.new(secret: secret, database: :memory, rate_limit: {storage: "database"})
 
@@ -124,6 +144,35 @@ RSpec.describe BetterAuth::Hanami::Migration do
     expect(migration).to include("add_column :role, String")
     expect(migration).to include("add_index :role")
     expect(migration).not_to include("create_table :users")
+  end
+
+  it "renders pending reference fields as foreign keys" do
+    plugin_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      user: {
+        additional_fields: {
+          managerEmail: {type: "string", required: false, field_name: "manager_email", references: {model: "user", field: "email", on_delete: "set_null"}, index: true}
+        }
+      }
+    )
+    existing = {
+      "users" => {
+        name: "users",
+        columns: {"id" => "varchar", "email" => "varchar", "name" => "varchar", "email_verified" => "boolean", "image" => "text", "created_at" => "datetime", "updated_at" => "datetime"},
+        indexes: {names: Set.new(["index_users_on_email"]), columns: Set.new(["email"]), unique_columns: Set.new(["email"])}
+      },
+      "sessions" => {name: "sessions", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "accounts" => {name: "accounts", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}},
+      "verifications" => {name: "verifications", columns: {}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}}
+    }
+    plan = BetterAuth::SQLMigration.plan_from_existing(plugin_config, existing: existing, dialect: :postgres)
+
+    migration = described_class.render_pending(plan)
+
+    expect(migration).to include("add_foreign_key :manager_email, :users, type: String, key: :email, on_delete: :set_null")
+    expect(migration).not_to include("add_column :manager_email")
+    expect(migration).to include("add_index :manager_email")
   end
 
   def secret

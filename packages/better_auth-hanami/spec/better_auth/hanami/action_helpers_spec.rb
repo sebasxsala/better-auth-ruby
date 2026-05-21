@@ -140,6 +140,20 @@ RSpec.describe BetterAuth::Hanami::ActionHelpers do
     expect(response.headers.fetch("set-cookie")).to include("Max-Age=0")
   end
 
+  it "appends session cleanup cookies without replacing existing response cookies" do
+    request = fake_request(
+      {
+        "better_auth.session" => nil,
+        "better_auth.session_headers" => {"set-cookie" => "better-auth.session_token=; Max-Age=0"}
+      }
+    )
+    response = fake_response
+    response.headers["set-cookie"] = "app=1; Path=/"
+
+    expect(action.require_authentication(request, response)).to be(false)
+    expect(response.headers.fetch("set-cookie")).to eq("app=1; Path=/\nbetter-auth.session_token=; Max-Age=0")
+  end
+
   def sign_up_headers
     status, headers, = BetterAuth::Hanami.auth.call(
       rack_env("POST", "/api/auth/sign-up/email", body: JSON.generate(email: "ada@example.com", password: "password123", name: "Ada"))

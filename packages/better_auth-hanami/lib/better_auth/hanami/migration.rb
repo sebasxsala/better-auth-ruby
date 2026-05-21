@@ -35,7 +35,7 @@ module BetterAuth
           "  change do"
         ]
         plan.to_create.each { |change| lines.concat(create_table_lines(change.table, plan.tables)) }
-        plan.to_add.each { |change| lines.concat(alter_table_lines(change)) }
+        plan.to_add.each { |change| lines.concat(alter_table_lines(change, plan.tables)) }
         plan.to_index.reject { |change| created_tables.include?(change.table_name) }.each do |change|
           lines.concat(alter_table_index_lines(change))
         end
@@ -121,16 +121,9 @@ module BetterAuth
       end
 
       def column_line(logical_field, attributes, options)
-        column = attributes[:field_name] || physical_name(logical_field)
-        reference = attributes[:references]
-        if reference
-          target = foreign_key_target(reference.fetch(:model), options)
-          parts = ["foreign_key :#{column}, :#{target}", "type: #{hanami_type(attributes)}"]
-          parts << "null: false" if attributes[:required]
-          parts << "on_delete: :#{reference[:on_delete]}" if reference[:on_delete]
-          return "      #{parts.join(", ")}"
-        end
+        return foreign_key_line("foreign_key", logical_field, attributes, options) if attributes[:references]
 
+        column = attributes[:field_name] || physical_name(logical_field)
         parts = ["column :#{column}", hanami_type(attributes)]
         parts << "null: false" if attributes[:required]
         default = default_value(attributes)
@@ -146,16 +139,18 @@ module BetterAuth
         "      index :#{column}#{unique}"
       end
 
-      def alter_table_lines(change)
+      def alter_table_lines(change, tables)
         lines = ["", "    alter_table :#{change.table_name} do"]
         change.fields.each do |logical_field, attributes|
-          lines << add_column_line(logical_field, attributes)
+          lines << add_column_line(logical_field, attributes, tables)
         end
         lines << "    end"
         lines
       end
 
-      def add_column_line(logical_field, attributes)
+      def add_column_line(logical_field, attributes, tables)
+        return foreign_key_line("add_foreign_key", logical_field, attributes, tables) if attributes[:references]
+
         column = attributes[:field_name] || physical_name(logical_field)
         parts = ["add_column :#{column}", hanami_type(attributes)]
         parts << "null: false" if attributes[:required]
@@ -196,9 +191,42 @@ module BetterAuth
         end
       end
 
-      def foreign_key_target(model, options)
-        tables = BetterAuth::Schema.auth_tables(options)
-        tables.fetch(model.to_s, nil)&.fetch(:model_name) || model
+      def foreign_key_line(command, logical_field, attributes, options_or_tables)
+        column = attributes[:field_name] || physical_name(logical_field)
+        reference = attributes.fetch(:references)
+        target, target_key = foreign_key_target(reference, options_or_tables)
+        parts = ["#{command} :#{column}, :#{target}", "type: #{hanami_type(attributes)}"]
+        parts << "null: false" if attributes[:required]
+        parts << "key: :#{target_key}" unless target_key == "id"
+        parts << "on_delete: :#{reference[:on_delete]}" if reference[:on_delete]
+        "      #{parts.join(", ")}"
+      end
+
+      def foreign_key_target(reference, options_or_tables)
+        tables = auth_tables_for(options_or_tables)
+        model = reference.fetch(:model).to_s
+        table = tables.fetch(model, nil) || tables.each_value.find { |candidate| candidate.fetch(:model_name).to_s == model }
+        target = table&.fetch(:model_name) || model
+        [target, foreign_key_target_field(reference, table)]
+      end
+
+      def foreign_key_target_field(reference, table)
+        field = reference.fetch(:field).to_s
+        return physical_name(field) unless table
+
+        attributes = table.fetch(:fields).fetch(field, nil)
+        return attributes[:field_name] || physical_name(field) if attributes
+        return field if table.fetch(:fields).each_value.any? { |data| data[:field_name].to_s == field }
+
+        physical_name(field)
+      end
+
+      def auth_tables_for(options_or_tables)
+        if options_or_tables.is_a?(Hash) && options_or_tables.values.all? { |value| value.is_a?(Hash) && value.key?(:fields) && value.key?(:model_name) }
+          options_or_tables
+        else
+          BetterAuth::Schema.auth_tables(options_or_tables)
+        end
       end
 
       def physical_name(value)

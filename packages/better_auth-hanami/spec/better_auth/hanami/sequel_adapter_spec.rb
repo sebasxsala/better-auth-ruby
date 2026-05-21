@@ -272,6 +272,31 @@ RSpec.describe BetterAuth::Hanami::SequelAdapter do
   end
 
   describe ".from_container" do
+    it "uses the Hanami db.gateway connection when present" do
+      db = Sequel.sqlite
+      gateway = Struct.new(:connection).new(db)
+      container = Class.new do
+        def initialize(gateway)
+          @gateway = gateway
+        end
+
+        def key?(key)
+          key == "db.gateway"
+        end
+
+        def [](key)
+          raise KeyError unless key == "db.gateway"
+
+          @gateway
+        end
+      end.new(gateway)
+
+      adapter = described_class.from_container(container, config)
+
+      expect(adapter).to be_a(described_class)
+      expect(adapter.connection).to equal(db)
+    end
+
     it "warns when db.gateway is missing and memory storage is used" do
       container = Class.new do
         def key?(_key) = false
