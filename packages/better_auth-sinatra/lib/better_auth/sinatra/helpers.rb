@@ -84,21 +84,6 @@ module BetterAuth
         )
       end
 
-      def better_auth_request_headers
-        request.env.each_with_object({}) do |(key, value), headers|
-          case key
-          when "CONTENT_TYPE"
-            headers["content-type"] = value if value
-          when "CONTENT_LENGTH"
-            headers["content-length"] = value if value
-          else
-            next unless key.start_with?("HTTP_")
-
-            headers[key.delete_prefix("HTTP_").downcase.tr("_", "-")] = value
-          end
-        end
-      end
-
       def apply_better_auth_response_headers(headers)
         set_cookie = headers["set-cookie"] || headers["Set-Cookie"] || headers[:set_cookie]
         return if set_cookie.to_s.empty?

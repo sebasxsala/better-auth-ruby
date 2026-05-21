@@ -126,10 +126,14 @@ Sinatra does not include a Rails-style database layer or migration command.
 This adapter uses Better Auth core SQL adapters for migrations. Set
 `BETTER_AUTH_DIALECT=postgres`, `mysql`, or `sqlite` when generating SQL.
 
-Generated SQL should keep one statement per line ending with `;`. The migration
-runner handles simple single-line multi-statement files, but hand-edited SQL
-with semicolons inside string literals can confuse the splitter. DDL rollback
-behavior depends on the database, so back up production data before migrating.
+The migration runner delegates SQL rendering and execution behavior to the core
+Better Auth SQL migration layer. It handles multiple statements, quoted strings,
+and PostgreSQL dollar-quoted blocks; DDL rollback behavior still depends on the
+database, so back up production data before migrating.
+
+Exhaustive adapter behavior for PostgreSQL, MySQL, SQLite, and other database
+families is covered in the core `better_auth` package. This Sinatra package only
+smoke-tests that its configuration and Rake tasks delegate to those core paths.
 
 ActiveRecord-backed Sinatra migrations are not supported yet. Apps that already
 use `sinatra-activerecord` can still configure Better Auth manually, but the v1

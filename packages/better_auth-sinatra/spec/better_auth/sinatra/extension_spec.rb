@@ -2,6 +2,44 @@
 
 require_relative "../../spec_helper"
 
+class SinatraRateLimitStorage
+  attr_reader :data
+
+  def initialize
+    @data = {}
+  end
+
+  def get(key)
+    data[key]
+  end
+
+  def set(key, value, ttl: nil, update: false)
+    data[key] = value
+  end
+
+  def keys
+    data.keys
+  end
+end
+
+class SinatraSecondaryStorage
+  attr_reader :data, :ttls
+
+  def initialize
+    @data = {}
+    @ttls = {}
+  end
+
+  def get(key)
+    data[key]
+  end
+
+  def set(key, value, ttl = nil)
+    data[key] = value
+    ttls[key] = ttl
+  end
+end
+
 RSpec.describe "BetterAuth::Sinatra extension" do
   include Rack::Test::Methods
 
@@ -175,6 +213,66 @@ RSpec.describe "BetterAuth::Sinatra extension" do
       "HTTP_COOKIE" => "better-auth.session_token=stale-token"
     }
     expect(last_response.status).to eq(403)
+  end
+
+  it "applies mounted rate limits with custom storage" do
+    storage = SinatraRateLimitStorage.new
+    self.app = build_app(plugins: [limited_plugin], overrides: {rate_limit: {enabled: true, window: 60, max: 1, custom_storage: storage}})
+
+    get "/api/auth/limited?nonce=1"
+    expect(last_response.status).to eq(200)
+
+    get "/api/auth/limited?nonce=2"
+
+    expect(last_response.status).to eq(429)
+    expect(last_response["x-retry-after"]).to match(/\A\d+\z/)
+    expect(JSON.parse(last_response.body)).to eq("message" => "Too many requests. Please try again later.")
+    expect(storage.keys).to eq(["127.0.0.1|/limited"])
+  end
+
+  it "applies mounted rate limits against the logical path for shared auth mounts" do
+    storage = SinatraRateLimitStorage.new
+    self.app = build_app(plugins: [limited_plugin], overrides: {rate_limit: {enabled: true, window: 60, max: 1, custom_storage: storage}})
+
+    get "/limited", {}, {"SCRIPT_NAME" => "/api/auth", "PATH_INFO" => "/limited"}
+    expect(last_response.status).to eq(200)
+
+    get "/limited", {}, {"SCRIPT_NAME" => "/api/auth", "PATH_INFO" => "/limited"}
+
+    expect(last_response.status).to eq(429)
+    expect(storage.keys).to eq(["127.0.0.1|/limited"])
+  end
+
+  it "applies mounted rate limits with secondary storage" do
+    storage = SinatraSecondaryStorage.new
+    self.app = build_app(
+      plugins: [limited_plugin],
+      overrides: {
+        secondary_storage: storage,
+        rate_limit: {enabled: true, window: 60, max: 1, storage: "secondary-storage"}
+      }
+    )
+
+    get "/api/auth/limited"
+
+    expect(last_response.status).to eq(200)
+    stored = JSON.parse(storage.data.fetch("127.0.0.1|/limited"))
+    expect(stored.keys.sort).to eq(["count", "key", "lastRequest"])
+    expect(stored.fetch("key")).to eq("127.0.0.1|/limited")
+    expect(stored.fetch("count")).to eq(1)
+    expect(stored.fetch("lastRequest")).to be_a(Integer)
+    expect(storage.ttls.fetch("127.0.0.1|/limited")).to eq(60)
+  end
+
+  it "applies mounted rate limits with database storage" do
+    self.app = build_app(plugins: [limited_plugin], overrides: {rate_limit: {enabled: true, window: 60, max: 1, storage: "database"}})
+
+    get "/api/auth/limited"
+
+    expect(last_response.status).to eq(200)
+    stored = app.settings.better_auth_auth.context.adapter.find_one(model: "rateLimit", where: [{field: "key", value: "127.0.0.1|/limited"}])
+    expect(stored.fetch("count")).to eq(1)
+    expect(stored.fetch("lastRequest")).to be_a(Integer)
   end
 
   it "lets Sinatra helpers resolve the current Better Auth user from real cookies" do
@@ -441,6 +539,15 @@ RSpec.describe "BetterAuth::Sinatra extension" do
       id: "sinatra-origin-probe",
       endpoints: {
         post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
+      }
+    )
+  end
+
+  def limited_plugin
+    BetterAuth::Plugin.new(
+      id: "sinatra-rate-limit",
+      endpoints: {
+        limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
       }
     )
   end

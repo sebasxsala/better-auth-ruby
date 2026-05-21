@@ -121,6 +121,21 @@ RSpec.describe BetterAuth::Sinatra::Migration do
     expect(sql).to include('CREATE INDEX IF NOT EXISTS "index_api_keys_on_user_id"')
   end
 
+  it "delegates SQL rendering for supported core dialects" do
+    config = BetterAuth::Configuration.new(secret: secret, database: :memory)
+
+    postgres = described_class.render(config, dialect: :postgres)
+    mysql = described_class.render(config, dialect: :mysql)
+    sqlite = described_class.render(config, dialect: :sqlite)
+
+    expect(postgres).to include("-- Dialect: postgres")
+    expect(postgres).to include('CREATE TABLE IF NOT EXISTS "users"')
+    expect(mysql).to include("-- Dialect: mysql")
+    expect(mysql).to include("CREATE TABLE IF NOT EXISTS `users`")
+    expect(sqlite).to include("-- Dialect: sqlite")
+    expect(sqlite).to include('CREATE TABLE IF NOT EXISTS "users"')
+  end
+
   it "rejects migration execution for adapters without SQL dialect support" do
     auth = BetterAuth.auth(secret: secret, database: :memory)
 
