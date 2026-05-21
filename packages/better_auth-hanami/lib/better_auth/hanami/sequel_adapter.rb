@@ -62,7 +62,8 @@ module BetterAuth
         model = model.to_s
         input = transform_input(model, data, "create", force_allow_id)
         table_dataset(model).insert(physical_attributes(model, input))
-        find_one(model: model, where: [{field: "id", value: input.fetch("id")}])
+        lookup = create_lookup(model, input)
+        lookup ? find_one(model: model, where: [lookup]) : input
       end
 
       def find_one(model:, where: [], select: nil, join: nil)
@@ -89,21 +90,25 @@ module BetterAuth
 
       def update(model:, where:, update:)
         model = model.to_s
-        existing = find_one(model: model, where: where, select: ["id"])
+        existing = find_one(model: model, where: where)
         return nil unless existing
 
         update_many(model: model, where: where, update: update)
-        find_one(model: model, where: [{field: "id", value: existing.fetch("id")}])
+        lookup = record_lookup(model, existing)
+        lookup ? find_one(model: model, where: [lookup]) : find_one(model: model, where: where)
       end
 
       def update_many(model:, where:, update:, returning: false)
         model = model.to_s
-        existing = returning ? find_many(model: model, where: where, select: ["id"]) : []
+        existing = returning ? find_many(model: model, where: where) : []
         attributes = physical_attributes(model, transform_input(model, update, "update", true))
         apply_where(model, table_dataset(model), where || []).update(attributes)
         return unless returning
 
-        existing.map { |record| find_one(model: model, where: [{field: "id", value: record.fetch("id")}]) }
+        existing.map do |record|
+          lookup = record_lookup(model, record)
+          lookup ? find_one(model: model, where: [lookup]) : record
+        end
       end
 
       def delete(model:, where:)
@@ -292,8 +297,28 @@ module BetterAuth
           output[field] = coerce_value(value, attributes) if value_provided
         end
 
-        output["id"] = generated_id if action == "create" && !output.key?("id")
+        output["id"] = generated_id if action == "create" && !output.key?("id") && fields.key?("id")
         output
+      end
+
+      def create_lookup(model, input)
+        fields = schema_for(model).fetch(:fields)
+        return {field: "id", value: input.fetch("id")} if fields.key?("id") && input.key?("id")
+
+        unique_field = fields.find { |field, attributes| attributes[:unique] && input.key?(field) }
+        return {field: unique_field.first, value: input.fetch(unique_field.first)} if unique_field
+
+        nil
+      end
+
+      def record_lookup(model, record)
+        fields = schema_for(model).fetch(:fields)
+        return {field: "id", value: record.fetch("id")} if fields.key?("id") && record.key?("id")
+
+        unique_field = fields.find { |field, attributes| attributes[:unique] && record.key?(field) }
+        return {field: unique_field.first, value: record.fetch(unique_field.first)} if unique_field
+
+        nil
       end
 
       def physical_attributes(model, logical)

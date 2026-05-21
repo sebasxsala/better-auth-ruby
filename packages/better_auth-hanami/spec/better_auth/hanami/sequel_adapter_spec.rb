@@ -165,6 +165,24 @@ RSpec.describe BetterAuth::Hanami::SequelAdapter do
     expect(user.fetch("emailVerified")).to be(false)
   end
 
+  it "creates and updates database rate limit rows without an id field" do
+    rate_limit_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      rate_limit: {storage: "database"}
+    )
+    db = Sequel.sqlite
+    apply_migration(db, rate_limit_config)
+    adapter = described_class.new(rate_limit_config, connection: db)
+
+    record = adapter.create(model: "rateLimit", data: {key: "ip:127.0.0.1", count: 1, lastRequest: 123})
+    updated = adapter.update(model: "rateLimit", where: [{field: "key", value: "ip:127.0.0.1"}], update: {count: 2})
+
+    expect(record).to include("key" => "ip:127.0.0.1", "count" => 1)
+    expect(record).not_to have_key("id")
+    expect(updated).to include("key" => "ip:127.0.0.1", "count" => 2)
+  end
+
   it "raises controlled API errors for invalid query fields and pagination" do
     db = Sequel.sqlite
     apply_migration(db, config)

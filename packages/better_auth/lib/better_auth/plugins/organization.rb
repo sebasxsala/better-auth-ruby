@@ -1126,8 +1126,11 @@ module BetterAuth
     def ensure_not_last_owner!(ctx, member)
       return unless member["role"].to_s.split(",").include?("owner")
 
-      owners = ctx.context.adapter.find_many(model: "member", where: [{field: "organizationId", value: member["organizationId"]}]).select { |entry| entry["role"].to_s.split(",").include?("owner") }
-      raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER")) if owners.length <= 1
+      owner_count = 0
+      organization_each_adapter_record(ctx.context.adapter, "member", where: [{field: "organizationId", value: member["organizationId"]}]) do |entry|
+        owner_count += 1 if entry["role"].to_s.split(",").include?("owner")
+      end
+      raise APIError.new("BAD_REQUEST", message: ORGANIZATION_ERROR_CODES.fetch("YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER")) if owner_count <= 1
     end
 
     def create_default_team(ctx, config, organization, session)
@@ -1145,8 +1148,24 @@ module BetterAuth
     end
 
     def organization_created_count(ctx, user_id)
-      members = ctx.context.adapter.find_many(model: "member", where: [{field: "userId", value: user_id}])
-      members.count { |member| member["role"].to_s.split(",").include?("owner") }
+      count = 0
+      organization_each_adapter_record(ctx.context.adapter, "member", where: [{field: "userId", value: user_id}]) do |member|
+        count += 1 if member["role"].to_s.split(",").include?("owner")
+      end
+      count
+    end
+
+    def organization_each_adapter_record(adapter, model, where:, page_size: 100)
+      offset = 0
+      loop do
+        records = adapter.find_many(model: model, where: where, limit: page_size, offset: offset)
+        break if records.empty?
+
+        records.each { |record| yield record }
+        break if records.length < page_size
+
+        offset += records.length
+      end
     end
 
     def run_org_hook(config, key, data, ctx)

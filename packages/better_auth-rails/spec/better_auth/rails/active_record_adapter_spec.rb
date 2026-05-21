@@ -288,7 +288,7 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     expect(user.fetch("id")).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/)
   end
 
-  it "does not inject generated IDs for schema models without an id field" do
+  it "injects generated IDs for schema models with generated id fields" do
     rate_limit_config = BetterAuth::Configuration.new(
       secret: secret,
       database: :memory,
@@ -303,8 +303,37 @@ RSpec.describe BetterAuth::Rails::ActiveRecordAdapter do
     )
     created = rate_limit_adapter.send(:model_class, "rateLimit").created_records.first
 
-    expect(created.attributes).not_to have_key("id")
+    expect(created.attributes.fetch("id")).to be_a(String)
     expect(record).to include("key" => "127.0.0.1:/sign-in", "count" => 1, "lastRequest" => 1_715_000_000_000)
+  end
+
+  it "updates schema models by using a unique lookup" do
+    rate_limit_config = BetterAuth::Configuration.new(
+      secret: secret,
+      database: :memory,
+      rate_limit: {storage: "database"}
+    )
+    rate_limit_adapter = described_class.new(rate_limit_config, connection: connection)
+    relation = BetterAuthRailsFakeRelation.new(
+      [
+        BetterAuthRailsFakeRecord.new(
+          "key" => "127.0.0.1:/sign-in",
+          "count" => 1,
+          "last_request" => 1_715_000_000_000
+        )
+      ]
+    )
+    rate_limit_adapter.send(:model_class, "rateLimit").relation = relation
+
+    updated = rate_limit_adapter.update(
+      model: "rateLimit",
+      where: [{field: "key", value: "127.0.0.1:/sign-in"}],
+      update: {count: 2}
+    )
+
+    expect(updated).to include("key" => "127.0.0.1:/sign-in")
+    expect(relation.where_calls).to include([{"key" => "127.0.0.1:/sign-in"}])
+    expect(relation.update_all_calls).to include("count" => 2)
   end
 
   it "wraps work in an ActiveRecord transaction" do

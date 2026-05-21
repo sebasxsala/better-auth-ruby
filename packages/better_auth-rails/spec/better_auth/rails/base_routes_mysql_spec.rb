@@ -102,11 +102,6 @@ RSpec.describe "BetterAuth::Rails ActiveRecord base routes (MySQL)" do
   end
 
   def reset_schema
-    connection = ActiveRecord::Base.connection
-    connection.execute("SET FOREIGN_KEY_CHECKS = 0")
-    %w[rate_limits verifications accounts sessions users].each do |table|
-      connection.execute("DROP TABLE IF EXISTS `#{table}`")
-    end
-    connection.execute("SET FOREIGN_KEY_CHECKS = 1")
+    reset_mysql_schema
   end
 end

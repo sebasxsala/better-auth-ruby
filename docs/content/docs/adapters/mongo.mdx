@@ -146,10 +146,10 @@ references are stored as native BSON UUID values and returned to Ruby callers as
 UUID strings. If you provide a callable custom id generator, the returned value
 is stored as-is.
 
-Ruby's adapters accept scalar values for `in` and `not_in` filters and coerce
-them to a one-element list. This is an intentional Ruby adapter-family
-adaptation; upstream's TypeScript adapter factory validates those filters
-before the Mongo adapter internals receive them.
+Ruby's MongoDB adapter requires array values for `in` filters, matching the
+shared adapter validation contract. It accepts scalar values for `not_in` and
+coerces them to a one-element list as a Ruby adapter-family compatibility
+adaptation.
 
 ## Additional Information
 

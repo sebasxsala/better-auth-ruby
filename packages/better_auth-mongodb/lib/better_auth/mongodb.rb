@@ -463,9 +463,8 @@ module BetterAuth
       def collection_name(model)
         model = default_model_name(model)
         configured = configured_model_name(model)
-        return "#{configured}s" if configured && use_plural
-        return configured if configured
         return schema_for(model).fetch(:model_name) if use_plural
+        return configured if configured
 
         model.to_s
       end

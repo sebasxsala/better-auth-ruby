@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed organization owner counting to page through adapter results instead of
+  relying on a single uncapped `find_many` call.
+
 ## [0.7.0] - 2026-05-05
 
 ### Added

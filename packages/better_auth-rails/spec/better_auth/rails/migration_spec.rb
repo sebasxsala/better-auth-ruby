@@ -10,9 +10,8 @@ RSpec.describe BetterAuth::Rails::Migration do
     migration = described_class.render(config)
 
     expect(migration).to include("class CreateBetterAuthTables < ActiveRecord::Migration")
-    expect(migration).to include("create_table :users, id: false")
-    expect(migration).to include("t.string :id, limit: 191, null: false")
-    expect(migration).to include("ALTER TABLE \#{quote_table_name(:users)} ADD PRIMARY KEY")
+    expect(migration).to include("create_table :users, id: :string")
+    expect(migration).not_to include("ALTER TABLE \#{quote_table_name(:users)} ADD PRIMARY KEY")
     expect(migration).to include("t.boolean :email_verified, null: false, default: false")
     expect(migration).to include("add_index :users, :email, unique: true")
     expect(migration).to include("add_foreign_key :sessions, :users, column: :user_id, on_delete: :cascade")
@@ -55,11 +54,11 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     migration = described_class.render(rate_limit_config)
 
-    expect(migration).to include("create_table :rate_limits, id: false")
-    expect(migration).to include("t.string :id, limit: 191, null: false")
+    expect(migration).to include("create_table :rate_limits, id: :string")
+    expect(migration).not_to include("t.string :id, limit: 191, null: false")
     expect(migration).to include("t.string :key, limit: 191, null: false")
     expect(migration).to include("add_index :rate_limits, :key, unique: true")
-    expect(migration).to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
+    expect(migration).not_to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
   end
 
   it "renders plugin tables and maps logical foreign-key targets to physical Rails tables" do
@@ -86,7 +85,7 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     migration = described_class.render(plugin_config)
 
-    expect(migration).to include("create_table :audit_logs, id: false")
+    expect(migration).to include("create_table :audit_logs, id: :string")
     expect(migration).to include("t.string :user_id, limit: 191")
     expect(migration).to include("t.string :action, limit: 191, null: false")
     expect(migration).to include("t.integer :attempts, null: false, default: 0")
@@ -146,17 +145,17 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     migration = described_class.render(plugin_config)
 
-    expect(migration).to include("create_table :api_keys, id: false")
-    expect(migration).to include("create_table :oauth_clients, id: false")
-    expect(migration).to include("create_table :oauth_refresh_tokens, id: false")
-    expect(migration).to include("create_table :oauth_access_tokens, id: false")
-    expect(migration).to include("create_table :oauth_consents, id: false")
-    expect(migration).to include("create_table :scim_providers, id: false")
-    expect(migration).to include("create_table :sso_providers, id: false")
-    expect(migration).to include("create_table :subscriptions, id: false")
-    expect(migration).to include("create_table :device_codes, id: false")
-    expect(migration).to include("create_table :two_factors, id: false")
-    expect(migration).to include("create_table :wallet_addresses, id: false")
+    expect(migration).to include("create_table :api_keys, id: :string")
+    expect(migration).to include("create_table :oauth_clients, id: :string")
+    expect(migration).to include("create_table :oauth_refresh_tokens, id: :string")
+    expect(migration).to include("create_table :oauth_access_tokens, id: :string")
+    expect(migration).to include("create_table :oauth_consents, id: :string")
+    expect(migration).to include("create_table :scim_providers, id: :string")
+    expect(migration).to include("create_table :sso_providers, id: :string")
+    expect(migration).to include("create_table :subscriptions, id: :string")
+    expect(migration).to include("create_table :device_codes, id: :string")
+    expect(migration).to include("create_table :two_factors, id: :string")
+    expect(migration).to include("create_table :wallet_addresses, id: :string")
   end
 
   it "renders json and array schema field types" do
@@ -227,13 +226,13 @@ RSpec.describe BetterAuth::Rails::Migration do
 
     migration = described_class.render(plugin_config)
 
-    expect(migration).to include("create_table :organizations, id: false")
-    expect(migration).to include("create_table :members, id: false")
-    expect(migration).to include("create_table :invitations, id: false")
-    expect(migration).to include("create_table :teams, id: false")
-    expect(migration).to include("create_table :team_members, id: false")
-    expect(migration).to include("create_table :organization_roles, id: false")
-    expect(migration).to include("create_table :passkeys, id: false")
+    expect(migration).to include("create_table :organizations, id: :string")
+    expect(migration).to include("create_table :members, id: :string")
+    expect(migration).to include("create_table :invitations, id: :string")
+    expect(migration).to include("create_table :teams, id: :string")
+    expect(migration).to include("create_table :team_members, id: :string")
+    expect(migration).to include("create_table :organization_roles, id: :string")
+    expect(migration).to include("create_table :passkeys, id: :string")
     expect(migration).to include("t.string :active_organization_id, limit: 191")
     expect(migration).to include("t.string :active_team_id, limit: 191")
     expect(migration).to include("t.string :credential_id, limit: 191, null: false")
@@ -279,7 +278,7 @@ RSpec.describe BetterAuth::Rails::Migration do
     migration = described_class.render_pending(plan, class_name: "UpdateBetterAuthTables")
 
     expect(migration).to include("class UpdateBetterAuthTables < ActiveRecord::Migration")
-    expect(migration).to include("create_table :audit_logs, id: false")
+    expect(migration).to include("create_table :audit_logs, id: :string")
     expect(migration).to include("add_column :users, :role, :string, limit: 191")
     expect(migration).to include("add_index :users, :role")
     expect(migration).not_to include("create_table :users")

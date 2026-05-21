@@ -58,6 +58,7 @@ module BetterAuth
           )
           table.fetch(:fields).each do |field, attributes|
             next unless attributes[:index]
+            next if attributes[:unique]
 
             column = attributes[:field_name] || physical_name(field)
             to_index << index_change(table_name, column, attributes, unique: false)

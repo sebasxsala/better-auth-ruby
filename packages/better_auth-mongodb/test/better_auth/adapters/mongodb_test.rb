@@ -777,6 +777,58 @@ class BetterAuthMongoDBAdapterTest < Minitest::Test
     assert_equal "Ada", adapter.find_one(model: "user", where: [{field: "email", value: "ada@example.com"}]).fetch("name")
   end
 
+  def test_mongodb_use_plural_uses_schema_model_names_without_extra_pluralization
+    plugin = {
+      id: "plural-schema",
+      schema: {
+        apiKey: {
+          modelName: "api_keys",
+          fields: {
+            key: {type: "string", required: true, index: true},
+            referenceId: {type: "string", required: true, index: true}
+          }
+        }
+      }
+    }
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [plugin],
+      user: {
+        model_name: "people"
+      }
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database, use_plural: true)
+
+    adapter.create(model: "user", data: {id: "user-1", name: "Ada", email: "ada@example.com"}, force_allow_id: true)
+    adapter.create(model: "apiKey", data: {id: "key-1", key: "hashed-key", referenceId: "user-1"}, force_allow_id: true)
+    summary = adapter.ensure_indexes!
+
+    assert_equal "Ada", @database.collection("people").documents.first.fetch("name")
+    assert_equal "hashed-key", @database.collection("api_keys").documents.first.fetch("key")
+    assert_empty @database.collection("peoples").documents
+    assert_empty @database.collection("api_keyss").documents
+    assert_includes summary, {collection: "people", field: "email", keys: {"email" => 1}, unique: true}
+    assert_includes summary, {collection: "api_keys", field: "key", keys: {"key" => 1}, unique: false}
+  end
+
+  def test_mongodb_organization_created_count_reads_past_default_find_many_limit
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [BetterAuth::Plugins.organization]
+    )
+    adapter = BetterAuth::Adapters::MongoDB.new(config, database: @database)
+    ctx = Struct.new(:context).new(Struct.new(:adapter).new(adapter))
+    user = adapter.create(model: "user", data: {id: "owner-1", name: "Owner", email: "owner@example.com"}, force_allow_id: true)
+    101.times do |index|
+      organization = adapter.create(model: "organization", data: {id: "org-#{index}", name: "Org #{index}", slug: "org-#{index}"}, force_allow_id: true)
+      adapter.create(model: "member", data: {id: "member-#{index}", organizationId: organization.fetch("id"), userId: user.fetch("id"), role: "owner"}, force_allow_id: true)
+    end
+
+    assert_equal 101, BetterAuth::Plugins.organization_created_count(ctx, user.fetch("id"))
+  end
+
   def test_mongodb_adapter_matches_upstream_where_coercions_and_json_storage
     plugin = {
       id: "parity-fields",

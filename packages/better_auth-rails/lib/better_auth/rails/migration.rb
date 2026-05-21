@@ -20,7 +20,6 @@ module BetterAuth
           "  def change"
         ]
         tables.each_value { |table| lines.concat(create_table_lines(table, dialect: dialect)) }
-        tables.each_value { |table| lines.concat(primary_key_lines(table)) }
         tables.each_value { |table| lines.concat(index_lines(table)) }
         tables.each_value { |table| lines.concat(foreign_key_lines(table, options)) }
         lines.concat(["  end", "end", ""])
@@ -37,7 +36,6 @@ module BetterAuth
           "  def change"
         ]
         plan.to_create.each { |change| lines.concat(create_table_lines(change.table, dialect: plan.dialect)) }
-        plan.to_create.each { |change| lines.concat(primary_key_lines(change.table)) }
         plan.to_create.each { |change| lines.concat(index_lines(change.table)) }
         plan.to_create.each { |change| lines.concat(foreign_key_lines(change.table, plan.tables)) }
         plan.to_add.each { |change| lines.concat(add_column_lines(change, dialect: plan.dialect)) }
@@ -108,11 +106,24 @@ module BetterAuth
 
       def create_table_lines(table, dialect: :rails)
         table_name = table.fetch(:model_name)
-        lines = ["", "    create_table :#{table_name}, id: false do |t|"]
+        lines = ["", "    create_table :#{table_name}, #{primary_key_options(table, dialect: dialect)} do |t|"]
         table.fetch(:fields).each do |logical_field, attributes|
+          next if logical_field == "id"
+
           lines << column_line(logical_field, attributes, dialect: dialect)
         end
         lines << "    end"
+      end
+
+      def primary_key_options(table, dialect: :rails)
+        attributes = table.fetch(:fields)["id"]
+        return "id: false" unless attributes
+
+        column = attributes[:field_name] || physical_name("id")
+        parts = ["id: :#{rails_type("id", attributes, dialect)}"]
+        parts << "limit: #{BOUNDED_STRING_LIMIT}" if limited_string?("id", attributes)
+        parts << "primary_key: :#{column}" unless column == "id"
+        parts.join(", ")
       end
 
       def column_line(logical_field, attributes, dialect: :rails)
@@ -158,15 +169,6 @@ module BetterAuth
       def index_line(table_name, column, unique: false)
         unique_option = unique ? ", unique: true" : ""
         "    add_index :#{table_name}, :#{column}#{unique_option}"
-      end
-
-      def primary_key_lines(table)
-        table_name = table.fetch(:model_name)
-        return [] unless table.fetch(:fields).key?("id")
-
-        [
-          %(    execute "ALTER TABLE \#{quote_table_name(:#{table_name})} ADD PRIMARY KEY (\#{quote_column_name(:id)})")
-        ]
       end
 
       def foreign_key_lines(table, options)
