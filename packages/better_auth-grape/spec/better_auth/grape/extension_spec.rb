@@ -65,6 +65,15 @@ RSpec.describe "BetterAuth::Grape extension" do
     expect(JSON.parse(last_response.body)).to eq("ok" => true)
   end
 
+  it "preserves trailing slashes when SCRIPT_NAME and PATH_INFO split the mount prefix" do
+    self.app = build_api(mount_path: "/api/auth")
+
+    get "/ok/", {}, {"SCRIPT_NAME" => "/api/auth", "PATH_INFO" => "/ok/"}
+
+    expect(last_response.status).to eq(404)
+    expect(JSON.parse(last_response.body)).to eq("error" => "Not Found")
+  end
+
   it "dispatches auth when nested SCRIPT_NAME includes the mount prefix" do
     self.app = build_api(mount_path: "/api/auth")
 
@@ -109,6 +118,32 @@ RSpec.describe "BetterAuth::Grape extension" do
     expect(last_response.status).to eq(200)
     expect(JSON.parse(last_response.body)).to eq("mounted" => true, "path" => "/grape-probe", "cookie" => "present")
     expect(last_response["set-cookie"]).to include("grape_probe=1")
+  end
+
+  it "does not duplicate SCRIPT_NAME in Rack request path for shared auth mounts" do
+    plugin = BetterAuth::Plugin.new(
+      id: "grape-request-url",
+      endpoints: {
+        request_url_probe: BetterAuth::Endpoint.new(path: "/request-url-probe", method: "GET") do |ctx|
+          {
+            path: ctx.request.path,
+            url: ctx.request.url
+          }
+        end
+      }
+    )
+    self.app = build_api(mount_path: "/api/auth", plugins: [plugin])
+
+    get "/request-url-probe", {}, {
+      "SCRIPT_NAME" => "/api/auth",
+      "PATH_INFO" => "/request-url-probe",
+      "HTTP_HOST" => "example.org"
+    }
+
+    expect(last_response.status).to eq(200)
+    data = JSON.parse(last_response.body)
+    expect(data.fetch("path")).to eq("/api/auth/request-url-probe")
+    expect(data.fetch("url")).to eq("http://example.org/api/auth/request-url-probe")
   end
 
   it "keeps server-only plugin endpoints unreachable through the Grape mount" do
@@ -310,6 +345,77 @@ RSpec.describe "BetterAuth::Grape extension" do
     expect(last_response["set-cookie"].downcase).to include("max-age=0")
   end
 
+  it "passes the original Rack request to helper session lookup hooks" do
+    captured = []
+    self.app = build_api(
+      hooks: {
+        before: lambda do |ctx|
+          next unless ctx.path == "/get-session"
+
+          captured << {
+            request_class: ctx.request&.class&.name,
+            method: ctx.method,
+            script_name: ctx.request&.script_name,
+            path_info: ctx.request&.path_info,
+            path: ctx.request&.path
+          }
+          nil
+        end
+      }
+    )
+    sign_up_email("ada@example.com")
+
+    get "/dashboard", {}, {
+      "SCRIPT_NAME" => "",
+      "PATH_INFO" => "/dashboard",
+      "HTTP_COOKIE" => cookie_header(last_response["set-cookie"])
+    }
+
+    expect(last_response.status).to eq(200)
+    expect(captured.last).to include(
+      request_class: "Rack::Request",
+      method: "GET",
+      script_name: "",
+      path_info: "/dashboard",
+      path: "/dashboard"
+    )
+  end
+
+  it "preserves app cookies when helper lookup appends Better Auth cookies" do
+    self.app = build_api
+    sign_up_email("ada@example.com")
+    original_cookie = cookie_header(last_response["set-cookie"])
+
+    post "/api/auth/sign-out", "{}", {
+      "CONTENT_TYPE" => "application/json",
+      "HTTP_ORIGIN" => "http://example.org",
+      "HTTP_COOKIE" => original_cookie
+    }
+    expect(last_response.status).to eq(200)
+
+    clear_cookies
+    get "/cookie-dashboard", {}, "HTTP_COOKIE" => original_cookie
+
+    expect(last_response.status).to eq(200)
+    cookies = last_response["set-cookie"].lines
+    expect(cookies.any? { |line| line.include?("app_cookie=1") }).to be(true)
+    expect(cookies.any? { |line| line.include?("better-auth.session_token=") && line.downcase.include?("max-age=0") }).to be(true)
+  end
+
+  it "raises Better Auth API errors from helper session lookup" do
+    self.app = build_api(
+      hooks: {
+        before: lambda do |ctx|
+          raise BetterAuth::APIError.new("INTERNAL_SERVER_ERROR", message: "session lookup failed") if ctx.path == "/get-session"
+        end
+      }
+    )
+
+    expect {
+      get "/dashboard"
+    }.to raise_error(BetterAuth::APIError, /session lookup failed/)
+  end
+
   it "does not reuse a helper session across requests without cookies" do
     self.app = build_api
     sign_up_email("ada@example.com")
@@ -344,6 +450,64 @@ RSpec.describe "BetterAuth::Grape extension" do
     expect(JSON.parse(last_response.body)).to eq("code" => "UNAUTHORIZED", "message" => "Unauthorized")
   end
 
+  it "keeps the mount path as the core base path when overrides include base_path" do
+    self.app = build_api(mount_path: "/auth", overrides: {base_path: "/api/auth"})
+
+    get "/auth/ok"
+
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(last_response.body)).to eq("ok" => true)
+  end
+
+  it "rate limits mounted requests with memory storage" do
+    self.app = build_api(plugins: [limited_plugin], rate_limit: {enabled: true, window: 60, max: 1})
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(200)
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(429)
+  end
+
+  it "rate limits mounted requests with custom storage" do
+    storage = BetterAuthGrapeRateLimitStorage.new
+    self.app = build_api(plugins: [limited_plugin], rate_limit: {enabled: true, window: 60, max: 1, custom_storage: storage})
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(200)
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(429)
+    expect(storage.keys).to eq(["127.0.0.1|/limited"])
+  end
+
+  it "rate limits mounted requests with secondary storage" do
+    storage = BetterAuthGrapeSecondaryStorage.new
+    self.app = build_api(
+      plugins: [limited_plugin],
+      secondary_storage: storage,
+      rate_limit: {enabled: true, window: 60, max: 1, storage: "secondary-storage"}
+    )
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(200)
+    expect(JSON.parse(storage.data.fetch("127.0.0.1|/limited")).fetch("count")).to eq(1)
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(429)
+    expect(storage.ttls.fetch("127.0.0.1|/limited")).to eq(60)
+  end
+
+  it "rate limits mounted requests with database storage" do
+    self.app = build_api(plugins: [limited_plugin], rate_limit: {enabled: true, window: 60, max: 1, storage: "database"})
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(200)
+
+    get "/api/auth/limited"
+    expect(last_response.status).to eq(429)
+  end
+
   it "raises when better_auth mount path is root" do
     expect {
       Class.new(::Grape::API) do
@@ -358,7 +522,28 @@ RSpec.describe "BetterAuth::Grape extension" do
     }.to raise_error(ArgumentError, /better_auth mount path cannot be/)
   end
 
-  def build_api(mount_path: "/api/auth", plugins: [], overrides: {})
+  it "raises when better_auth is configured twice on the same API class" do
+    secret = "grape-secret-that-is-long-enough-for-validation"
+
+    expect {
+      Class.new(::Grape::API) do
+        include BetterAuth::Grape
+
+        better_auth at: "/api/auth" do |config|
+          config.secret = secret
+          config.base_url = "http://example.org"
+          config.database = :memory
+        end
+        better_auth at: "/auth2" do |config|
+          config.secret = secret
+          config.base_url = "http://example.org"
+          config.database = :memory
+        end
+      end
+    }.to raise_error(ArgumentError, /better_auth is already configured/)
+  end
+
+  def build_api(mount_path: "/api/auth", plugins: [], hooks: nil, rate_limit: nil, secondary_storage: nil, overrides: {})
     secret = "grape-secret-that-is-long-enough-for-validation"
 
     Class.new(::Grape::API) do
@@ -372,9 +557,17 @@ RSpec.describe "BetterAuth::Grape extension" do
         config.database = :memory
         config.email_and_password = {enabled: true}
         config.plugins = plugins
+        config.hooks = hooks if hooks
+        config.rate_limit = rate_limit if rate_limit
+        config.secondary_storage = secondary_storage if secondary_storage
       end
 
       get "/dashboard" do
+        {authenticated: authenticated?, user: current_user}
+      end
+
+      get "/cookie-dashboard" do
+        header "Set-Cookie", "app_cookie=1; path=/"
         {authenticated: authenticated?, user: current_user}
       end
 
@@ -461,5 +654,54 @@ RSpec.describe "BetterAuth::Grape extension" do
         post: BetterAuth::Endpoint.new(path: "/post", method: "POST") { {ok: true} }
       }
     )
+  end
+
+  def limited_plugin
+    BetterAuth::Plugin.new(
+      id: "grape-rate-limit",
+      endpoints: {
+        limited: BetterAuth::Endpoint.new(path: "/limited", method: "GET") { {ok: true} }
+      }
+    )
+  end
+end
+
+class BetterAuthGrapeRateLimitStorage
+  attr_reader :data, :sets
+
+  def initialize
+    @data = {}
+    @sets = []
+  end
+
+  def get(key)
+    data[key]
+  end
+
+  def set(key, value, ttl: nil, update: false)
+    sets << [key, ttl, update]
+    data[key] = value
+  end
+
+  def keys
+    data.keys
+  end
+end
+
+class BetterAuthGrapeSecondaryStorage
+  attr_reader :data, :ttls
+
+  def initialize
+    @data = {}
+    @ttls = {}
+  end
+
+  def get(key)
+    data[key]
+  end
+
+  def set(key, value, ttl)
+    data[key] = value
+    ttls[key] = ttl
   end
 end

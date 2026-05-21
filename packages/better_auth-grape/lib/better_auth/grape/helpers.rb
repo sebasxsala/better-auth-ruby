@@ -85,7 +85,8 @@ module BetterAuth
         set_cookie = headers["set-cookie"] || headers["Set-Cookie"] || headers[:set_cookie]
         return if set_cookie.to_s.empty?
 
-        header "Set-Cookie", [env["better_auth.set_cookie"], set_cookie.to_s].compact.join("\n")
+        existing = header["Set-Cookie"].to_s
+        header "Set-Cookie", [existing, set_cookie.to_s].reject(&:empty?).join("\n")
         env["better_auth.set_cookie"] = [env["better_auth.set_cookie"], set_cookie.to_s].compact.join("\n")
       end
 

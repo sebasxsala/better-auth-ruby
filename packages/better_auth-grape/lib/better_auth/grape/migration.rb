@@ -37,6 +37,16 @@ module BetterAuth
       def normalize_dialect(value)
         BetterAuth::SQLMigration.normalize_dialect(value)
       end
+
+      def method_missing(name, *args, **kwargs, &block)
+        return BetterAuth::SQLMigration.public_send(name, *args, **kwargs, &block) if BetterAuth::SQLMigration.respond_to?(name)
+
+        super
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        BetterAuth::SQLMigration.respond_to?(name, include_private) || super
+      end
     end
   end
 end
