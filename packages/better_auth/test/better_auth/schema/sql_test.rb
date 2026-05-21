@@ -141,6 +141,61 @@ class BetterAuthSchemaSQLTest < Minitest::Test
     assert_includes sql, '"active_team_id" text'
   end
 
+  def test_plugin_tables_without_explicit_id_receive_primary_key_columns
+    plugin = BetterAuth::Plugin.new(
+      id: "idless-plugin",
+      schema: {
+        apiKey: {
+          model_name: "api_keys",
+          fields: {
+            key: {type: "string", required: true, index: true},
+            referenceId: {type: "string", required: true}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(
+      secret: SECRET,
+      database: :memory,
+      plugins: [plugin],
+      rate_limit: {storage: "database"}
+    )
+
+    tables = BetterAuth::Schema.auth_tables(config)
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+
+    assert tables.fetch("apiKey").fetch(:fields).key?("id")
+    assert tables.fetch("rateLimit").fetch(:fields).key?("id")
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "api_keys"'
+    assert_includes sql, '"id" text PRIMARY KEY NOT NULL'
+    assert_includes sql, 'CREATE TABLE IF NOT EXISTS "rate_limits"'
+  end
+
+  def test_foreign_keys_reference_physical_target_field_names
+    plugin = BetterAuth::Plugin.new(
+      id: "oauth-like",
+      schema: {
+        oauthClient: {
+          model_name: "oauth_clients",
+          fields: {
+            clientId: {type: "string", required: true, unique: true}
+          }
+        },
+        oauthToken: {
+          model_name: "oauth_tokens",
+          fields: {
+            clientId: {type: "string", required: true, references: {model: "oauthClient", field: "clientId"}}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+
+    sql = BetterAuth::Schema::SQL.create_statements(config, dialect: :postgres).join("\n")
+
+    assert_includes sql, 'FOREIGN KEY ("client_id") REFERENCES "oauth_clients" ("client_id") ON DELETE CASCADE'
+  end
+
   def test_recommended_lookup_fields_are_indexed_when_tables_are_created
     config = BetterAuth::Configuration.new(
       secret: SECRET,

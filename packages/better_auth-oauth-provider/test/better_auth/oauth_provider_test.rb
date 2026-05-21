@@ -137,6 +137,21 @@ class BetterAuthPluginsOAuthProviderTest < Minitest::Test
     assert_equal true, schema.fetch("oauthAccessToken")[:fields].fetch("refreshId")[:index]
   end
 
+  def test_oauth_schema_preserves_upstream_foreign_key_references
+    schema = BetterAuth::Schema.auth_tables(build_auth.options)
+
+    assert_equal({model: "user", field: "id", on_delete: "cascade"}, schema.fetch("oauthClient")[:fields].fetch("userId")[:references])
+    assert_equal({model: "oauthClient", field: "clientId", on_delete: "cascade"}, schema.fetch("oauthRefreshToken")[:fields].fetch("clientId")[:references])
+    assert_equal({model: "session", field: "id", on_delete: "set null"}, schema.fetch("oauthRefreshToken")[:fields].fetch("sessionId")[:references])
+    assert_equal({model: "user", field: "id", on_delete: "cascade"}, schema.fetch("oauthRefreshToken")[:fields].fetch("userId")[:references])
+    assert_equal({model: "oauthClient", field: "clientId", on_delete: "cascade"}, schema.fetch("oauthAccessToken")[:fields].fetch("clientId")[:references])
+    assert_equal({model: "session", field: "id", on_delete: "set null"}, schema.fetch("oauthAccessToken")[:fields].fetch("sessionId")[:references])
+    assert_equal({model: "user", field: "id", on_delete: "cascade"}, schema.fetch("oauthAccessToken")[:fields].fetch("userId")[:references])
+    assert_equal({model: "oauthRefreshToken", field: "id", on_delete: "cascade"}, schema.fetch("oauthAccessToken")[:fields].fetch("refreshId")[:references])
+    assert_equal({model: "oauthClient", field: "clientId", on_delete: "cascade"}, schema.fetch("oauthConsent")[:fields].fetch("clientId")[:references])
+    assert_equal({model: "user", field: "id", on_delete: "cascade"}, schema.fetch("oauthConsent")[:fields].fetch("userId")[:references])
+  end
+
   def test_consent_schema_drops_consent_given_column
     fields = BetterAuth::Schema.auth_tables(build_auth.options).fetch("oauthConsent")[:fields].keys
 

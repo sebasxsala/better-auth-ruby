@@ -161,6 +161,41 @@ class BetterAuthMigrationSQLTest < Minitest::Test
     assert_equal ["index_api_keys_on_user_id"], plan.to_index.map(&:name)
   end
 
+  def test_postgres_pending_migration_backfills_missing_plugin_id_columns
+    plugin = BetterAuth::Plugin.new(
+      id: "idless-plugin",
+      schema: {
+        apiKey: {
+          model_name: "api_keys",
+          fields: {
+            key: {type: "string", required: true}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    existing = BetterAuth::Schema.auth_tables(BetterAuth::Configuration.new(secret: SECRET, database: :memory)).each_with_object({}) do |(_logical, table), schema|
+      schema[table.fetch(:model_name)] = {
+        name: table.fetch(:model_name),
+        columns: table.fetch(:fields).to_h do |field, attributes|
+          type = (attributes[:type] == "date") ? "timestamptz" : "text"
+          [attributes[:field_name] || BetterAuth::Schema.send(:physical_name, field), type]
+        end,
+        indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}
+      }
+    end
+    existing["api_keys"] = {name: "api_keys", columns: {"key" => "text"}, indexes: {names: Set.new, columns: Set.new, unique_columns: Set.new}}
+
+    plan = BetterAuth::SQLMigration.plan_from_existing(config, existing: existing, dialect: :postgres)
+    sql = BetterAuth::Schema::SQL.pending_statements(plan).join("\n")
+
+    assert_includes sql, 'ALTER TABLE "api_keys" ADD COLUMN "id" text;'
+    assert_includes sql, 'UPDATE "api_keys" SET "id" = md5'
+    assert_includes sql, 'ALTER TABLE "api_keys" ALTER COLUMN "id" SET NOT NULL;'
+    assert_includes sql, 'ALTER TABLE "api_keys" ADD PRIMARY KEY ("id");'
+    refute_includes sql, 'ADD COLUMN "id" text PRIMARY KEY NOT NULL'
+  end
+
   def test_warns_on_type_mismatch_without_planning_destructive_alter
     connection = SQLite3::Database.new(":memory:")
     connection.results_as_hash = true

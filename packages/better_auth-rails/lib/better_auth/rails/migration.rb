@@ -9,8 +9,9 @@ module BetterAuth
 
       module_function
 
-      def render(options, migration_version: nil)
+      def render(options, migration_version: nil, dialect: nil)
         migration_version ||= self.migration_version
+        dialect ||= active_record_connection ? active_record_dialect(active_record_connection) : :rails
         tables = BetterAuth::Schema.auth_tables(options)
         lines = [
           "# frozen_string_literal: true",
@@ -18,7 +19,7 @@ module BetterAuth
           "class CreateBetterAuthTables < ActiveRecord::Migration[#{migration_version}]",
           "  def change"
         ]
-        tables.each_value { |table| lines.concat(create_table_lines(table)) }
+        tables.each_value { |table| lines.concat(create_table_lines(table, dialect: dialect)) }
         tables.each_value { |table| lines.concat(primary_key_lines(table)) }
         tables.each_value { |table| lines.concat(index_lines(table)) }
         tables.each_value { |table| lines.concat(foreign_key_lines(table, options)) }
@@ -35,11 +36,11 @@ module BetterAuth
           "class #{class_name} < ActiveRecord::Migration[#{migration_version}]",
           "  def change"
         ]
-        plan.to_create.each { |change| lines.concat(create_table_lines(change.table)) }
+        plan.to_create.each { |change| lines.concat(create_table_lines(change.table, dialect: plan.dialect)) }
         plan.to_create.each { |change| lines.concat(primary_key_lines(change.table)) }
         plan.to_create.each { |change| lines.concat(index_lines(change.table)) }
         plan.to_create.each { |change| lines.concat(foreign_key_lines(change.table, plan.tables)) }
-        plan.to_add.each { |change| lines.concat(add_column_lines(change)) }
+        plan.to_add.each { |change| lines.concat(add_column_lines(change, dialect: plan.dialect)) }
         plan.to_index.reject { |change| created_tables.include?(change.table_name) }.each do |change|
           lines << index_line(change.table_name, change.field_name, unique: change.unique)
         end
@@ -61,6 +62,8 @@ module BetterAuth
 
       def active_record_connection
         ::ActiveRecord::Base.connection if defined?(::ActiveRecord::Base)
+      rescue
+        nil
       end
 
       def active_record_dialect(connection)
@@ -103,18 +106,23 @@ module BetterAuth
         "7.0"
       end
 
-      def create_table_lines(table)
+      def create_table_lines(table, dialect: :rails)
         table_name = table.fetch(:model_name)
         lines = ["", "    create_table :#{table_name}, id: false do |t|"]
         table.fetch(:fields).each do |logical_field, attributes|
-          lines << column_line(logical_field, attributes)
+          lines << column_line(logical_field, attributes, dialect: dialect)
         end
         lines << "    end"
       end
 
-      def column_line(logical_field, attributes)
+      def column_line(logical_field, attributes, dialect: :rails)
         column = attributes[:field_name] || physical_name(logical_field)
-        parts = ["t.#{rails_type(logical_field, attributes)} :#{column}"]
+        type = rails_type(logical_field, attributes, dialect)
+        parts = if type == "timestamptz"
+          ["t.column :#{column}, :timestamptz"]
+        else
+          ["t.#{type} :#{column}"]
+        end
         parts.concat(column_options(logical_field, attributes))
         "      #{parts.join(", ")}"
       end
@@ -138,10 +146,10 @@ module BetterAuth
         end
       end
 
-      def add_column_lines(change)
+      def add_column_lines(change, dialect: :rails)
         change.fields.map do |logical_field, attributes|
           column = attributes[:field_name] || physical_name(logical_field)
-          parts = ["    add_column :#{change.table_name}, :#{column}, :#{rails_type(logical_field, attributes)}"]
+          parts = ["    add_column :#{change.table_name}, :#{column}, :#{rails_type(logical_field, attributes, dialect)}"]
           parts.concat(column_options(logical_field, attributes))
           parts.join(", ")
         end
@@ -163,23 +171,27 @@ module BetterAuth
 
       def foreign_key_lines(table, options)
         table_name = table.fetch(:model_name)
+        tables = table_map(options)
         table.fetch(:fields).filter_map do |logical_field, attributes|
           reference = attributes[:references]
           next unless reference
 
           column = attributes[:field_name] || physical_name(logical_field)
-          target = foreign_key_target(reference.fetch(:model), options)
+          target_table = foreign_key_target_table(reference, tables)
+          target = target_table&.fetch(:model_name) || reference.fetch(:model)
+          target_field = foreign_key_target_field(reference, target_table)
+          primary_key = (target_field.to_s == "id") ? "" : ", primary_key: :#{target_field}"
           on_delete = reference[:on_delete] ? ", on_delete: :#{reference[:on_delete]}" : ""
-          "    add_foreign_key :#{table_name}, :#{target}, column: :#{column}#{on_delete}"
+          "    add_foreign_key :#{table_name}, :#{target}, column: :#{column}#{primary_key}#{on_delete}"
         end
       end
 
-      def rails_type(logical_field, attributes)
+      def rails_type(logical_field, attributes, dialect = :rails)
         case attributes[:type]
         when "boolean" then "boolean"
-        when "date" then "datetime"
+        when "date" then (dialect == :postgres) ? "timestamptz" : "datetime"
         when "number" then attributes[:bigint] ? "bigint" : "integer"
-        when "json", "string[]", "number[]" then "json"
+        when "json", "string[]", "number[]" then (dialect == :postgres) ? "jsonb" : "json"
         when "string" then bounded_string?(logical_field, attributes) ? "string" : "text"
         else "text"
         end
@@ -215,8 +227,32 @@ module BetterAuth
         BetterAuth::Schema.send(:physical_name, value)
       end
 
-      def foreign_key_target(model, options)
-        BetterAuth::Schema.auth_tables(options).fetch(model.to_s, nil)&.fetch(:model_name) || model
+      def table_map(options)
+        if options.respond_to?(:values) && options.values.all? { |value| value.respond_to?(:fetch) && value.key?(:fields) }
+          options
+        else
+          BetterAuth::Schema.auth_tables(options)
+        end
+      end
+
+      def foreign_key_target_table(reference, tables)
+        model = reference.fetch(:model).to_s
+        tables.fetch(model, nil) || tables.each_value.find { |table| table.fetch(:model_name).to_s == model }
+      end
+
+      def foreign_key_target_field(reference, target_table)
+        field = reference.fetch(:field).to_s
+        return field unless target_table
+
+        fields = target_table.fetch(:fields)
+        attributes = fields.fetch(field, nil)
+        return attributes[:field_name] || physical_name(field) if attributes
+
+        if fields.each_value.any? { |data| data[:field_name].to_s == field }
+          field
+        else
+          physical_name(field)
+        end
       end
     end
   end

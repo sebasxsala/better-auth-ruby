@@ -18,6 +18,7 @@ module BetterAuth
       tables.delete("verification") if secondary_storage?(options) && !verification_option(options, :store_in_database)
       tables.merge!(plugin_schema)
       tables["rateLimit"] = rate_limit_table(options) if rate_limit_option(options, :storage) == "database"
+      ensure_id_fields!(tables)
       tables.sort_by { |_name, table| table[:order] || Float::INFINITY }.to_h
     end
 
@@ -119,6 +120,15 @@ module BetterAuth
           "lastRequest" => field("number", required: true, bigint: true, default_value: -> { current_millis }, field_name: rate_limit_field(options, "lastRequest"))
         }
       }
+    end
+
+    private_class_method def self.ensure_id_fields!(tables)
+      tables.each_value do |table|
+        fields = table.fetch(:fields)
+        next if fields.key?("id")
+
+        table[:fields] = id_field.merge(fields)
+      end
     end
 
     private_class_method def self.base_fields

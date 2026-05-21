@@ -250,28 +250,30 @@ module BetterAuth
           operator = (fetch_key(clause, :operator) || "eq").to_s
           value = fetch_key(clause, :value)
           attributes = schema_for(model).fetch(:fields).fetch(field)
+          insensitive = insensitive_string_predicate?(clause, attributes)
+          predicate_column = insensitive ? "LOWER(#{column})" : column
 
           expression = case operator
           when "in", "not_in"
-            values = Array(value).map { |entry| coerce_where_value(entry, attributes) }
+            values = Array(value).map { |entry| insensitive ? entry.to_s.downcase : coerce_where_value(entry, attributes) }
             placeholders = values.map do |entry|
               params << entry
               placeholder(params.length)
             end.join(", ")
             sql_operator = (operator == "not_in") ? "NOT IN" : "IN"
-            "#{column} #{sql_operator} (#{placeholders})"
+            "#{predicate_column} #{sql_operator} (#{placeholders})"
           when "contains", "starts_with", "ends_with"
-            escaped = escape_like(value)
+            escaped = escape_like(insensitive ? value.to_s.downcase : value)
             pattern = case operator
             when "starts_with" then "#{escaped}%"
             when "ends_with" then "%#{escaped}"
             else "%#{escaped}%"
             end
             params << pattern
-            "#{column} LIKE #{placeholder(params.length)} ESCAPE #{escape_literal}"
+            "#{predicate_column} LIKE #{placeholder(params.length)} ESCAPE #{escape_literal}"
           else
-            params << coerce_where_value(value, attributes)
-            "#{column} #{sql_operator(operator)} #{placeholder(params.length)}"
+            params << (insensitive ? value.to_s.downcase : coerce_where_value(value, attributes))
+            "#{predicate_column} #{sql_operator(operator)} #{placeholder(params.length)}"
           end
 
           connector = (index.positive? && fetch_key(clause, :connector).to_s.upcase == "OR") ? "OR" : "AND"
@@ -308,6 +310,10 @@ module BetterAuth
           "lt" => "<",
           "lte" => "<="
         }.fetch(operator, "=")
+      end
+
+      def insensitive_string_predicate?(clause, attributes)
+        fetch_key(clause, :mode).to_s == "insensitive" && attributes[:type] == "string"
       end
 
       def execute(sql, params)

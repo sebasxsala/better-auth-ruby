@@ -46,7 +46,7 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).not_to include("t.text :role, default: \"member\"")
   end
 
-  it "renders database rate-limit tables without synthetic primary keys" do
+  it "renders database rate-limit tables with generated primary keys" do
     rate_limit_config = BetterAuth::Configuration.new(
       secret: "test-secret-that-is-long-enough-for-validation",
       database: :memory,
@@ -56,9 +56,10 @@ RSpec.describe BetterAuth::Rails::Migration do
     migration = described_class.render(rate_limit_config)
 
     expect(migration).to include("create_table :rate_limits, id: false")
+    expect(migration).to include("t.string :id, limit: 191, null: false")
     expect(migration).to include("t.string :key, limit: 191, null: false")
     expect(migration).to include("add_index :rate_limits, :key, unique: true")
-    expect(migration).not_to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
+    expect(migration).to include("ALTER TABLE \#{quote_table_name(:rate_limits)} ADD PRIMARY KEY")
   end
 
   it "renders plugin tables and maps logical foreign-key targets to physical Rails tables" do
@@ -93,6 +94,31 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("add_index :audit_logs, :user_id")
     expect(migration).to include("add_index :audit_logs, :action, unique: true")
     expect(migration).to include("add_foreign_key :audit_logs, :users, column: :user_id, on_delete: :cascade")
+  end
+
+  it "renders foreign keys against physical target field names" do
+    plugin = BetterAuth::Plugin.new(
+      id: "oauth-like",
+      schema: {
+        oauthClient: {
+          model_name: "oauth_clients",
+          fields: {
+            clientId: {type: "string", required: true, unique: true}
+          }
+        },
+        oauthToken: {
+          model_name: "oauth_tokens",
+          fields: {
+            clientId: {type: "string", required: true, references: {model: "oauthClient", field: "clientId"}}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(secret: "test-secret-that-is-long-enough-for-validation", database: :memory, plugins: [plugin])
+
+    migration = described_class.render(plugin_config)
+
+    expect(migration).to include("add_foreign_key :oauth_tokens, :oauth_clients, column: :client_id, primary_key: :client_id, on_delete: :cascade")
   end
 
   it "renders default plugin table names as plural snake case" do
@@ -159,6 +185,34 @@ RSpec.describe BetterAuth::Rails::Migration do
     expect(migration).to include("t.json :metadata")
     expect(migration).to include("t.json :tags")
     expect(migration).to include("t.json :scores")
+  end
+
+  it "renders PostgreSQL-native jsonb and timestamptz types" do
+    plugin = BetterAuth::Plugin.new(
+      id: "typed",
+      schema: {
+        typedRecord: {
+          model_name: "typed_records",
+          fields: {
+            id: {type: "string", required: true},
+            metadata: {type: "json", required: false},
+            tags: {type: "string[]", required: false},
+            createdAt: {type: "date", required: true}
+          }
+        }
+      }
+    )
+    plugin_config = BetterAuth::Configuration.new(
+      secret: "test-secret-that-is-long-enough-for-validation",
+      database: :memory,
+      plugins: [plugin]
+    )
+
+    migration = described_class.render(plugin_config, dialect: :postgres)
+
+    expect(migration).to include("t.column :created_at, :timestamptz, null: false")
+    expect(migration).to include("t.jsonb :metadata")
+    expect(migration).to include("t.jsonb :tags")
   end
 
   it "renders organization and passkey plugin schema migrations" do

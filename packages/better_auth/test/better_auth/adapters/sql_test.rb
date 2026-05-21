@@ -264,6 +264,52 @@ class BetterAuthSQLAdapterTest < Minitest::Test
     assert_equal [[false]], connection.params
   end
 
+  def test_sql_adapter_honors_case_insensitive_string_predicates
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
+    connection = RecordingConnection.new([])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    adapter.find_many(
+      model: "user",
+      where: [
+        {field: "email", value: "ADA@EXAMPLE.COM", mode: "insensitive"},
+        {field: "name", operator: "contains", value: "LOVELACE", mode: "insensitive"},
+        {field: "email", operator: "in", value: ["ADA@EXAMPLE.COM", "GRACE@EXAMPLE.COM"], mode: "insensitive"}
+      ]
+    )
+
+    assert_includes connection.sql.first, 'LOWER("users"."email") = $1'
+    assert_includes connection.sql.first, 'LOWER("users"."name") LIKE $2'
+    assert_includes connection.sql.first, 'LOWER("users"."email") IN ($3, $4)'
+    assert_equal [["ada@example.com", "%lovelace%", "ada@example.com", "grace@example.com"]], connection.params
+  end
+
+  def test_sql_adapter_creates_records_for_idless_plugin_schema_tables
+    plugin = BetterAuth::Plugin.new(
+      id: "idless-plugin",
+      schema: {
+        apiKey: {
+          model_name: "api_keys",
+          fields: {
+            key: {type: "string", required: true},
+            referenceId: {type: "string", required: true},
+            createdAt: {type: "date", required: true},
+            updatedAt: {type: "date", required: true}
+          }
+        }
+      }
+    )
+    config = BetterAuth::Configuration.new(secret: SECRET, database: :memory, plugins: [plugin])
+    connection = RecordingConnection.new([{"id" => "generated-id", "key" => "hashed-key", "reference_id" => "user-1", "created_at" => Time.at(1), "updated_at" => Time.at(1)}])
+    adapter = BetterAuth::Adapters::SQL.new(config, connection: connection, dialect: :postgres)
+
+    created = adapter.create(model: "apiKey", data: {key: "hashed-key", referenceId: "user-1", createdAt: Time.at(1), updatedAt: Time.at(1)})
+
+    assert_equal "generated-id", created.fetch("id")
+    assert_includes connection.sql.first, '"id"'
+    assert_equal "hashed-key", created.fetch("key")
+  end
+
   def test_sql_adapter_uses_top_for_mssql_find_one
     config = BetterAuth::Configuration.new(secret: SECRET, database: :memory)
     connection = RecordingConnection.new([])

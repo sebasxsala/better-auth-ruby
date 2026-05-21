@@ -18,9 +18,13 @@ module BetterAuth
         end
         statements.concat(plan.to_add.flat_map do |change|
           change.fields.map do |logical_field, attributes|
-            add_column_statement(change.table_name, logical_field, attributes, plan.dialect)
+            if logical_field.to_s == "id" && plan.dialect == :postgres
+              add_postgres_id_column_statements(change.table_name)
+            else
+              add_column_statement(change.table_name, logical_field, attributes, plan.dialect)
+            end
           end
-        end)
+        end.flatten)
         statements.concat(plan.to_index.map do |change|
           index_statement(change.table_name, change.field_name, change.name, plan.dialect, unique: change.unique)
         end)
@@ -94,6 +98,17 @@ module BetterAuth
       def add_column_statement(table_name, logical_field, attributes, dialect)
         keyword = (dialect == :mssql) ? "ADD" : "ADD COLUMN"
         %(ALTER TABLE #{quote(table_name, dialect)} #{keyword} #{column_definition(table_name, logical_field, attributes, dialect)};)
+      end
+
+      def add_postgres_id_column_statements(table_name)
+        quoted_table = quote(table_name, :postgres)
+        quoted_id = quote("id", :postgres)
+        [
+          %(ALTER TABLE #{quoted_table} ADD COLUMN #{quoted_id} text;),
+          %(UPDATE #{quoted_table} SET #{quoted_id} = md5(random()::text || clock_timestamp()::text || ctid::text) WHERE #{quoted_id} IS NULL;),
+          %(ALTER TABLE #{quoted_table} ALTER COLUMN #{quoted_id} SET NOT NULL;),
+          %(ALTER TABLE #{quoted_table} ADD PRIMARY KEY (#{quoted_id});)
+        ]
       end
 
       def index_statement(table_name, column, name, dialect, unique: false, where_not_null: false)
@@ -203,8 +218,9 @@ module BetterAuth
       end
 
       def foreign_key_constraint(table_name, column, reference, dialect, tables = nil)
-        target_model = tables&.fetch(reference.fetch(:model).to_s, nil)&.fetch(:model_name) || reference.fetch(:model)
-        target_field = reference.fetch(:field)
+        target_table = foreign_key_target_table(reference, tables)
+        target_model = target_table&.fetch(:model_name) || reference.fetch(:model)
+        target_field = foreign_key_target_field(reference, target_table)
         on_delete = reference[:on_delete] ? " ON DELETE #{reference[:on_delete].to_s.upcase}" : ""
 
         case dialect
@@ -214,6 +230,28 @@ module BetterAuth
           %(CONSTRAINT #{quote("fk_#{table_name}_#{column}", dialect)} FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
         when :mssql
           %(CONSTRAINT #{quote("fk_#{table_name}_#{column}", dialect)} FOREIGN KEY (#{quote(column, dialect)}) REFERENCES #{quote(target_model, dialect)} (#{quote(target_field, dialect)})#{on_delete})
+        end
+      end
+
+      def foreign_key_target_table(reference, tables)
+        return unless tables
+
+        model = reference.fetch(:model).to_s
+        tables.fetch(model, nil) || tables.each_value.find { |table| table.fetch(:model_name).to_s == model }
+      end
+
+      def foreign_key_target_field(reference, target_table)
+        field = reference.fetch(:field).to_s
+        return field unless target_table
+
+        fields = target_table.fetch(:fields)
+        attributes = fields.fetch(field, nil)
+        return attributes[:field_name] || physical_name(field) if attributes
+
+        if fields.each_value.any? { |data| data[:field_name].to_s == field }
+          field
+        else
+          physical_name(field)
         end
       end
 
