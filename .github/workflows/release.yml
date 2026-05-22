@@ -482,6 +482,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install database client headers
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo "https://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10
+          sudo apt-get install -y --no-install-recommends default-libmysqlclient-dev freetds-dev
+
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -702,6 +710,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install database client headers
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo "https://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10
+          sudo apt-get install -y --no-install-recommends default-libmysqlclient-dev freetds-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -1051,6 +1067,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install database client headers
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo "https://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10
+          sudo apt-get install -y --no-install-recommends default-libmysqlclient-dev freetds-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -1462,6 +1486,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install database client headers
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo "https://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10
+          sudo apt-get install -y --no-install-recommends default-libmysqlclient-dev freetds-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
