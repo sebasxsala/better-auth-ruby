@@ -966,7 +966,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ../../.ruby-version
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-saml
 
@@ -989,7 +989,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ../../.ruby-version
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-oidc
 
@@ -1932,7 +1932,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ../../.ruby-version
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-saml
 
@@ -1981,7 +1981,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ../../.ruby-version
+          ruby-version: .ruby-version
           bundler-cache: true
           working-directory: packages/better_auth-oidc
 
