@@ -15,6 +15,8 @@ version_files:
   - packages/better_auth-roda/lib/better_auth/roda/version.rb
   - packages/better_auth-scim/lib/better_auth/scim/version.rb
   - packages/better_auth-sinatra/lib/better_auth/sinatra/version.rb
+  - packages/better_auth-oidc/lib/better_auth/oidc/version.rb
+  - packages/better_auth-saml/lib/better_auth/saml/version.rb
   - packages/better_auth-sso/lib/better_auth/sso/version.rb
   - packages/better_auth-stripe/lib/better_auth/stripe/version.rb
   - packages/better_auth-telemetry/lib/better_auth/telemetry/version.rb
@@ -33,6 +35,8 @@ literal_gemspec_versions:
   - packages/openauth-roda/openauth-roda.gemspec
   - packages/openauth-scim/openauth-scim.gemspec
   - packages/openauth-sinatra/openauth-sinatra.gemspec
+  - packages/openauth-oidc/openauth-oidc.gemspec
+  - packages/openauth-saml/openauth-saml.gemspec
   - packages/openauth-sso/openauth-sso.gemspec
   - packages/openauth-stripe/openauth-stripe.gemspec
   - packages/openauth-telemetry/openauth-telemetry.gemspec
@@ -64,6 +68,10 @@ pinned_dependencies:
     - better_auth-scim
   packages/openauth-sinatra/openauth-sinatra.gemspec:
     - better_auth-sinatra
+  packages/openauth-oidc/openauth-oidc.gemspec:
+    - better_auth-oidc
+  packages/openauth-saml/openauth-saml.gemspec:
+    - better_auth-saml
   packages/openauth-sso/openauth-sso.gemspec:
     - better_auth-sso
   packages/openauth-stripe/openauth-stripe.gemspec:

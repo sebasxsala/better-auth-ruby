@@ -13,5 +13,6 @@ require "openauth/sso"
 ```
 
 This package depends on `better_auth-sso` and loads the canonical Better Auth Ruby SSO plugin.
+For protocol-only installs, see `openauth-oidc` and `openauth-saml`.
 
 For documentation, visit https://better-auth-rb.vercel.app/.

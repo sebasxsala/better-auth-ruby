@@ -8,24 +8,22 @@ class BetterAuthSSORoutesSSOTest < Minitest::Test
   def test_endpoints_builds_core_sso_route_map
     endpoints = ROUTES.endpoints
 
-    assert_equal(
-      %i[
-        sp_metadata
-        register_sso_provider
-        sign_in_sso
-        callback_sso
-        callback_sso_shared
-        callback_sso_saml
-        acs_endpoint
-        slo_endpoint
-        initiate_slo
-        list_sso_providers
-        get_sso_provider
-        update_sso_provider
-        delete_sso_provider
-      ],
-      endpoints.keys
-    )
+    expected = %i[
+      sp_metadata
+      register_sso_provider
+      sign_in_sso
+      callback_sso
+      callback_sso_shared
+      callback_sso_saml
+      acs_endpoint
+      slo_endpoint
+      initiate_slo
+      list_sso_providers
+      get_sso_provider
+      update_sso_provider
+      delete_sso_provider
+    ]
+    assert_equal expected.sort, endpoints.keys.sort
     endpoints.each_value { |endpoint| assert_instance_of BetterAuth::Endpoint, endpoint }
   end
 

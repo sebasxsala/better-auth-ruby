@@ -38,6 +38,7 @@ module BetterAuth
           sso_store_oidc_pkce_verifier(ctx, state, pkce[:codeVerifier]) if pkce[:codeVerifier]
           url = sso_oidc_authorization_url(provider, ctx, state, config, body)
         elsif provider["samlConfig"]
+          BetterAuth::SSO.load_saml!
           relay_state = sso_generate_saml_relay_state(ctx, state_data)
           url = sso_saml_authorization_url(provider, relay_state, ctx, config)
           sso_store_saml_authn_request(ctx, provider, url, config)
