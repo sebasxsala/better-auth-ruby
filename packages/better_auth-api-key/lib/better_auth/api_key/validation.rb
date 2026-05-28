@@ -142,6 +142,7 @@ module BetterAuth
       def check_permissions!(record, required)
         return if required.nil? || required == {}
 
+        BetterAuth::Plugins.load_plugin!(:access)
         actual = BetterAuth::APIKey::Utils.decode_json(record["permissions"]) || {}
         result = BetterAuth::Plugins::Role.new(actual).authorize(required)
         unless result[:success]
