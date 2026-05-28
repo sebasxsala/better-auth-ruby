@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "better_auth/sso"
 require "base64"
 require "cgi"
 require "openssl"

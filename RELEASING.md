@@ -25,6 +25,8 @@ tag must match the package version exactly:
 | `better_auth-mongodb` | `better_auth-mongodb-vX.Y.Z` |
 | `better_auth-mongo-adapter` | `better_auth-mongo-adapter-vX.Y.Z` |
 | `better_auth-scim` | `better_auth-scim-vX.Y.Z` |
+| `better_auth-oidc` | `better_auth-oidc-vX.Y.Z` |
+| `better_auth-saml` | `better_auth-saml-vX.Y.Z` |
 | `better_auth-sso` | `better_auth-sso-vX.Y.Z` |
 | `better_auth-stripe` | `better_auth-stripe-vX.Y.Z` |
 
@@ -47,15 +49,17 @@ versions available before dependent gems are pushed.
    `better_auth-api-key`, `better_auth-hanami`, `better_auth-mongodb`,
    `better_auth-oauth-provider`, `better_auth-passkey`,
    `better_auth-rails`, `better_auth-redis-storage`, `better_auth-scim`,
-   `better_auth-sinatra`, `better_auth-sso`, and `better_auth-stripe`.
-3. Compatibility or alias gems that pin package versions:
+   `better_auth-sinatra`, `better_auth-oidc`, `better_auth-saml`,
+   `better_auth-sso`, and `better_auth-stripe`.
+3. `better_auth-sso` after `better_auth-oidc` (and after `better_auth-saml` is published if you release SAML separately first).
+4. Compatibility or alias gems that pin package versions:
    `better_auth-mongo-adapter` after `better_auth-mongodb`, and
    `better_auth_rails` with `better_auth-rails`.
-4. OpenAuth alias gems after their matching `better_auth*` packages are live:
+5. OpenAuth alias gems after their matching `better_auth*` packages are live:
    `openauth`, `openauth-api-key`, `openauth-hanami`, `openauth-mongodb`,
    `openauth-oauth-provider`, `openauth-passkey`, `openauth-rails`,
    `openauth-redis-storage`, `openauth-scim`, `openauth-sinatra`,
-   `openauth-sso`, and `openauth-stripe`.
+   `openauth-oidc`, `openauth-saml`, `openauth-sso`, and `openauth-stripe`.
 
 For MongoDB specifically, release `better_auth-mongodb` first. Only publish
 `better_auth-mongo-adapter` when you want to update the deprecated compatibility

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Breaking:** SAML is no longer a transitive dependency. Add `gem "better_auth-saml"` when using SAML providers.
+- Split protocol code into `better_auth-oidc` and `better_auth-saml`; this gem is now the convenience facade.
+
 ## 0.10.0 - 2026-05-21
 
 - Hardened SSO redirect, OIDC, SAML metadata, logout, and response handling.

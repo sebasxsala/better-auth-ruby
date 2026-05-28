@@ -2,10 +2,22 @@
 
 External SSO plugin package for `better_auth`.
 
-SSO is the app-facing feature. It supports OIDC SSO, SAML SSO, provider management,
-domain verification, SAML replay protection, runtime OIDC discovery, organization
-assignment, and SAML Single Logout. SAML is not the same thing as SSO; SAML is
-one protocol used by SSO.
+SSO is the app-facing feature: provider management, domain verification, composed
+routes, account linking, and sign-in orchestration. Protocol code is split into
+focused gems so OIDC-only apps do not install SAML/XML dependencies.
+
+## Installation matrix
+
+```ruby
+# OIDC enterprise only (no SAML XML stack)
+gem "better_auth-oidc"
+
+# Full SSO plugin (always includes OIDC via better_auth-oidc)
+gem "better_auth-sso"
+
+# SAML identity providers (required in addition to better_auth-sso)
+gem "better_auth-saml"
+```
 
 ```ruby
 require "better_auth"
@@ -18,7 +30,11 @@ BetterAuth.auth(
 )
 ```
 
-SAML XML validation is included in this package and backed by `ruby-saml`.
+SAML loads automatically when `better_auth-saml` is in the bundle, when
+`ENV["BETTER_AUTH_SSO_SAML"]=1`, or when plugin config enables SAML. Otherwise
+add `gem "better_auth-saml"` before using SAML providers.
+
+SAML XML validation is provided by `better_auth-saml` and backed by `ruby-saml`.
 Production XML SAML deployments should configure `BetterAuth::SSO::SAML.sso_options`
 or compatible SAML hooks so AuthnRequest generation and SAMLResponse parsing use
 the real XML/SAML boundary instead of the lightweight JSON/base64 fallback used by

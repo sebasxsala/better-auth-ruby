@@ -5,6 +5,8 @@ source "https://rubygems.org"
 ruby file: "../better_auth/.ruby-version"
 
 gem "better_auth", path: "../better_auth"
+gem "better_auth-oidc", path: "../better_auth-oidc"
+gem "better_auth-saml", path: "../better_auth-saml"
 
 gemspec name: "better_auth-sso"
 

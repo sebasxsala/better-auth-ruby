@@ -1,0 +1,16 @@
+# frozen_string_literal: true
+
+require "better_auth"
+require_relative "saml/version"
+require_relative "sso/plugin/saml_core"
+require_relative "sso/saml"
+require_relative "sso/saml/algorithms"
+require_relative "sso/saml/assertions"
+require_relative "sso/saml/error_codes"
+require_relative "sso/saml/timestamp"
+require_relative "sso/saml/parser"
+require_relative "sso/saml_hooks"
+require_relative "sso/saml_state"
+require_relative "sso/routes/saml_pipeline"
+require_relative "plugins/saml"
+require_relative "sso/constants"

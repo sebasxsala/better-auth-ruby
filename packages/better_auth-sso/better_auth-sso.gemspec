@@ -10,7 +10,8 @@ Gem::Specification.new do |spec|
 
   spec.summary = "SSO plugin package for Better Auth Ruby"
   spec.description = [
-    "Adds SSO provider management, OIDC SSO, and SAML SSO integration for Better Auth Ruby.",
+    "Adds SSO provider management, domain verification, and composed OIDC/SAML routes for Better Auth Ruby.",
+    "Requires better_auth-oidc; add better_auth-saml when using SAML identity providers.",
     "Better Auth Ruby is an independent modern authentication framework for Ruby inspired by Better Auth."
   ].join(" ")
   spec.homepage = "https://github.com/sebasxsala/better-auth-rb"
@@ -27,11 +28,11 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "better_auth", "~> 0.1"
+  spec.add_dependency "better_auth-oidc", "0.10.0"
   spec.add_dependency "base64", ">= 0.2", "< 1.0"
-  spec.add_dependency "jwt", "~> 2.8"
   spec.add_dependency "logger", ">= 1.6", "< 2.0"
-  spec.add_dependency "ruby-saml", "~> 1.18", ">= 1.18.1"
 
+  spec.add_development_dependency "better_auth-saml", "0.10.0"
   spec.add_development_dependency "bundler", "~> 2.5"
   spec.add_development_dependency "minitest", "~> 5.25"
   spec.add_development_dependency "rake", "~> 13.2"

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "better_auth/sso"
 require "json"
 require "rack/mock"
 require_relative "../../test_helper"

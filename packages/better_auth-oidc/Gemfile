@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+ruby file: "../better_auth/.ruby-version"
+
+gem "better_auth", path: "../better_auth"
+gem "better_auth-sso", path: "../better_auth-sso"
+gem "better_auth-saml", path: "../better_auth-saml"
+
+gemspec name: "better_auth-oidc"
+
+group :development, :test do
+  gem "minitest", "~> 5.25"
+  gem "rake", "~> 13.2"
+  gem "standardrb", "~> 1.0"
+end

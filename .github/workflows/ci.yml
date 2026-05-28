@@ -529,6 +529,48 @@ jobs:
         working-directory: packages/better_auth-scim
         run: bundle exec rake test
 
+  test-oidc:
+    name: Test better_auth-oidc (OIDC SSO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-oidc
+
+      - name: Run linter
+        working-directory: packages/better_auth-oidc
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-oidc
+        run: bundle exec rake test
+
+  test-saml:
+    name: Test better_auth-saml (SAML SSO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: packages/better_auth-saml
+
+      - name: Run linter
+        working-directory: packages/better_auth-saml
+        run: bundle exec standardrb
+
+      - name: Run tests
+        working-directory: packages/better_auth-saml
+        run: bundle exec rake test
+
   test-sso:
     name: Test better_auth-sso (SSO Plugin)
     runs-on: ubuntu-latest

@@ -19,6 +19,8 @@ class OpenAuthAliasPackagesTest < Minitest::Test
     "openauth-roda" => ["better_auth-roda", "openauth/roda"],
     "openauth-scim" => ["better_auth-scim", "openauth/scim"],
     "openauth-sinatra" => ["better_auth-sinatra", "openauth/sinatra"],
+    "openauth-oidc" => ["better_auth-oidc", "openauth/oidc"],
+    "openauth-saml" => ["better_auth-saml", "openauth/saml"],
     "openauth-sso" => ["better_auth-sso", "openauth/sso"],
     "openauth-stripe" => ["better_auth-stripe", "openauth/stripe"],
     "openauth-telemetry" => ["better_auth-telemetry", "openauth/telemetry"]
@@ -38,6 +40,8 @@ class OpenAuthAliasPackagesTest < Minitest::Test
     Roda
     SCIM
     Sinatra
+    OIDC
+    SAML
     SSO
     Stripe
     Telemetry
