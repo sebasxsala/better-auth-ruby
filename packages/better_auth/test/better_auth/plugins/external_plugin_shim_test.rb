@@ -26,20 +26,21 @@ class ExternalPluginShimTest < Minitest::Test
   private
 
   def assert_external_plugin_shim(method_name, gem_name, require_path)
-    original_require = Kernel.method(:require)
-    missing_require = lambda do |path|
-      raise LoadError, "cannot load such file -- #{path}" if path == require_path
-
-      original_require.call(path)
+    loader_called = false
+    ensure_loader = lambda do |**|
+      loader_called = true
+      raise LoadError,
+        "BetterAuth requires the #{gem_name} gem. Add it to your Gemfile and require \"#{require_path}\"."
     end
 
-    error = assert_raises(LoadError) do
-      Kernel.stub(:require, missing_require) do
+    error = BetterAuth::Plugins.stub(:ensure_external_plugin_loaded!, ensure_loader) do
+      assert_raises(LoadError) do
         BetterAuth::Plugins.public_send(method_name)
       end
     end
 
+    assert loader_called, "expected #{method_name} lazy loader to run"
     assert_includes error.message, gem_name
-    assert_includes error.message, "require \"#{require_path}\""
+    assert_includes error.message, require_path
   end
 end
